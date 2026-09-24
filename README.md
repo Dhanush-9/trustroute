@@ -4,10 +4,14 @@ This repository currently contains a small summarization demo: four agent profil
 
 ## Setup
 
-Requires Python 3.10+ and an activated virtual environment. From the project root:
+Requires Python 3.10+. Create a virtual environment and install the pinned
+runtime dependencies from the project root:
 
 ```bash
-python -m pip install a2a-sdk[http-server] httpx uvicorn
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip check
 ```
 
 For the `ollama` profile, run Ollama locally and make the `llama3.2` model available. You can override the defaults with `OLLAMA_HOST` and `OLLAMA_MODEL`.
@@ -62,5 +66,6 @@ x402 payment requirement and no payment occurs in this checkpoint.
 - `src/agent/server.py`: creates the A2A HTTP application.
 - `src/agent/run_agent.py`: starts one selected agent profile.
 - `src/client/demo_client.py`: discovers a card and invokes the agent.
+- `requirements.txt`: pins the direct runtime dependencies used by the demo.
 
 This demo does not yet implement ERC-8004 registration, x402 settlement, or reputation based selection.

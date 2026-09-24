@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import time
 
 import httpx
 from a2a.client import A2ACardResolver, ClientConfig, create_client
@@ -51,12 +52,15 @@ async def invoke(base_url: str, source: str) -> None:
         try:
             request = SendMessageRequest(message=new_text_message(source))
             received_message = False
+            start_time = time.perf_counter()
 
             async for chunk in client.send_message(request):
                 if chunk.HasField("message"):
                     received_message = True
+                    round_trip_ms = round( (time.perf_counter() - start_time) * 1000 )
                     print(f"Context ID: {chunk.message.context_id}")
                     print(f"Task ID: {chunk.message.task_id}")
+                    print(f"Client-observed invocation: {round_trip_ms} ms")
                     print(f"Response: {get_message_text(chunk.message)}")
 
         finally:
@@ -78,7 +82,7 @@ def _read_multiline_input() -> str:
             break
 
         lines.append(line)
-    
+
     return "\n".join(lines)
 
 
