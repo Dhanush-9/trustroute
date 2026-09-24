@@ -13,7 +13,13 @@ from a2a.server.events import EventQueue
 class DeterministicSummarizer(AgentExecutor):
     """Controlled test agent with known delay and sentence retention."""
 
-    def __init__( self, *, agent_name: str, latency_ms: int, retention_ratio: float):
+    def __init__(
+        self,
+        *,
+        agent_name: str,
+        latency_ms: int,
+        retention_ratio: float,
+    ) -> None:
         if latency_ms < 0:
             raise ValueError("latency_ms must be non-negative")
 
@@ -29,17 +35,15 @@ class DeterministicSummarizer(AgentExecutor):
         context: RequestContext, 
         event_queue: EventQueue
     ) -> None:
-
         source = context.get_user_input()
 
         started = time.perf_counter()
 
-        #sleep to simulate latency
+        # Controlled delay.
         await asyncio.sleep(self.latency_ms / 1000)
 
-        #separating the texxt into sentences
+        # Explicit steps keep the deterministic behavior easy to inspect.
         parts = source.split(".")
-
         sentences = []
 
         for part in parts:
@@ -48,7 +52,7 @@ class DeterministicSummarizer(AgentExecutor):
             if part:
                 sentences.append(part)
 
-        #decide how many sentences to keep
+        # Retention is controlled behavior, not a semantic quality measurement.
         keep = round(len(sentences) * self.retention_ratio)
 
         if keep < 1 and len(sentences) > 0:
@@ -61,7 +65,7 @@ class DeterministicSummarizer(AgentExecutor):
 
         elapsed_ms = round((time.perf_counter() - started) * 1000)
 
-        #how executor talks back
+        # Responses retain A2A correlation identifiers from the request context.
         await event_queue.enqueue_event(
             new_text_message(
                 f"[{self.agent_name} | {elapsed_ms}ms] {summary}",
@@ -84,12 +88,11 @@ class OllamaSummarizer(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         source = context.get_user_input()
-        
+
         started = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=120, trust_env=False) as http:
-
-                #sending a HTTP POST request
+                # A non-streaming response keeps the A2A baseline easy to follow.
                 response = await http.post(
                     f"{self.host}/api/chat",
                     json={
@@ -124,7 +127,7 @@ class OllamaSummarizer(AgentExecutor):
 
         elapsed_ms = round((time.perf_counter() - started) * 1000)
 
-        #how executor talks back
+        # The model implementation is hidden behind the same A2A response shape.
         await event_queue.enqueue_event(
             new_text_message(
                 f"[{self.agent_name} | {elapsed_ms}ms] {summary}",

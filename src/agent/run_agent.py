@@ -1,9 +1,12 @@
+"""Start one TrustRoute A2A summarization profile."""
+
 import sys
+
 import uvicorn
 
-from cards import build_agent_card, marketplace_extension
-from executor import DeterministicSummarizer, OllamaSummarizer
-from server import build_app
+from agent.cards import build_agent_card, marketplace_extension
+from agent.executor import DeterministicSummarizer, OllamaSummarizer
+from agent.server import build_app
 
 PROFILES = {
     "fast": {
@@ -35,10 +38,9 @@ PROFILES = {
 
 
 def main(profile: str) -> None:
-
-    #retrieve configuration from PROFILES
+    # Profiles make controlled cost, delay, and retention settings explicit.
     config = PROFILES[profile]
-    
+
     url = f"http://localhost:{config['port']}/"
     name = f"summarizer-{profile}"
 

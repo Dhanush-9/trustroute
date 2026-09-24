@@ -9,7 +9,7 @@ from a2a.types import (
 )
 from google.protobuf.struct_pb2 import Struct
 
-#identifier for marketplace extension
+# identifier to tell clients how to interpret this custom extension.
 MARKETPLACE_EXTENSION_URI = "https://trustroute.example/extensions/marketplace/v1"
 
 
@@ -20,7 +20,7 @@ def _dict_to_struct(data: dict) -> Struct:
 
 
 def marketplace_extension(*, advertised_price_usdc: float) -> AgentExtension:
-    """ Return self-declared listing data """
+    """Return self-declared listing data, not an authoritative payment quote."""
 
     return AgentExtension(
         uri=MARKETPLACE_EXTENSION_URI,
@@ -47,15 +47,14 @@ def build_agent_card(
     listing: AgentExtension,
     version: str = "0.1.0",
 ) -> AgentCard:
-
-    #list of endpoints and protocols where the service can be reached
+    # The interface tells an A2A client where and how to send requests.
     interface = AgentInterface(
         protocol_binding = "JSONRPC",
         url = url,
         protocol_version = "1.0",
     )
 
-    # Supported A2A features (like streaming or extended config)
+    # describe optional protocol behavior (like streaming or extended config).
     capabilities = AgentCapabilities(
         streaming = False,
         push_notifications = False,

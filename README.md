@@ -7,7 +7,7 @@ This repository currently contains a small summarization demo: four agent profil
 Requires Python 3.10+ and an activated virtual environment. From the project root:
 
 ```bash
-python -m pip install a2a-sdk[http-server] uvicorn
+python -m pip install a2a-sdk[http-server] httpx uvicorn
 ```
 
 For the `ollama` profile, run Ollama locally and make the `llama3.2` model available. You can override the defaults with `OLLAMA_HOST` and `OLLAMA_MODEL`.
@@ -18,17 +18,42 @@ Open two terminals in the project root and activate the virtual environment in e
 
 ```bash
 cd src
-python agent/run_agent.py fast
+python -m agent.run_agent fast
 ```
 
 In the second terminal:
 
 ```bash
 cd src
-python -m client.demo_client fast
+python -m client.demo_client \
+  --url http://localhost:8001 \
+  --message "TrustRoute uses A2A for agent communication."
 ```
 
-Paste text and press Enter twice to submit it. Replace `fast` in both commands with `accurate`, `new`, or `ollama` to try another profile. Each profile uses a different local port (8001–8004).
+Omit `--message` to paste multiline text interactively and press Enter twice
+to submit it. Start `accurate`, `new`, or `ollama` instead to try another
+profile. Their local ports are 8002, 8003, and 8004 respectively.
+
+## What the client does
+
+The client starts with a known service location. It then performs this A2A flow:
+
+```text
+explicit base URL
+    1. GET /.well-known/agent-card.json
+    2. inspect the advertised interface and skills
+    3. construct SendMessageRequest
+    4. send the JSON-RPC request
+    5. receive an A2A message
+    6. display its context ID, task ID, and text
+```
+
+This is **AgentCard resolution**, not marketplace discovery. Resolution asks
+an already-known service for its card. Discovery would first determine which
+agent and endpoint should be considered; ERC-8004 will provide that connection later.
+
+The card's USDC price is also self-declared discovery metadata. It is not an
+x402 payment requirement and no payment occurs in this checkpoint.
 
 ## Layout
 
