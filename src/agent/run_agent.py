@@ -1,6 +1,8 @@
 """Start one TrustRoute A2A summarization profile."""
 
+import os
 import sys
+from pathlib import Path
 
 import uvicorn
 
@@ -36,6 +38,8 @@ PROFILES = {
     },
 }
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 def main(profile: str) -> None:
     # Profiles make controlled cost, delay, and retention settings explicit.
@@ -56,21 +60,32 @@ def main(profile: str) -> None:
     )
 
     if profile == "ollama":
-        executor = OllamaSummarizer(agent_name = name)
+        executor = OllamaSummarizer(agent_name=name)
+        registration_document_path = Path(
+            os.environ.get(
+                "TRUSTROUTE_REGISTRATION_PATH",
+                str(PROJECT_ROOT / "var" / "registration.json"),
+            )
+        )
 
     else:
         executor = DeterministicSummarizer(
-            agent_name = name,
-            latency_ms = config["latency_ms"],
-            retention_ratio = config["retention_ratio"],
+            agent_name=name,
+            latency_ms=config["latency_ms"],
+            retention_ratio=config["retention_ratio"],
         )
+        registration_document_path = None
 
     print(f"{name} -> {url}.well-known/agent-card.json")
     uvicorn.run(
-        build_app(card, executor),
-        host = "127.0.0.1",
-        port = config["port"],
-        log_level = "warning",
+        build_app(
+            card,
+            executor,
+            registration_document_path=registration_document_path,
+        ),
+        host="127.0.0.1",
+        port=config["port"],
+        log_level="warning",
     )
 
 
