@@ -96,6 +96,28 @@ Finally, from the repository root, mint the identity, generate its registration 
 PYTHONPATH=src python scripts/register_ollama_agent.py
 ```
 
+## Checkpoint 2B: discover and invoke from identity
+
+With the local chain and Ollama agent still running, invoke the registered agent
+without supplying its service URL:
+
+```bash
+PYTHONPATH=src python -m client.discover_and_invoke \
+  --agent-id 0 \
+  --message "ERC-8004 identifies the agent and A2A invokes it."
+```
+
+The client starts from the deployment record and numeric agent ID. It reads the
+owner, agent wallet, and `agentURI` from the registry; fetches the registration
+document; verifies that the document refers back to the same chain, registry,
+and agent ID; selects its single A2A service; resolves the AgentCard; and sends
+the message through the existing A2A client path.
+
+This is identity-rooted discovery, not marketplace search. The client is told
+which identity to resolve; it does not yet enumerate, compare, or rank agents.
+No payment occurs even if an AgentCard advertises a price. A real x402 challenge
+and payment flow belongs to the next checkpoint.
+
 ## Layout
 
 - `src/agent/cards.py`: builds A2A AgentCards and marketplace discovery metadata.
@@ -103,8 +125,9 @@ PYTHONPATH=src python scripts/register_ollama_agent.py
 - `src/agent/server.py`: creates the A2A HTTP application.
 - `src/agent/run_agent.py`: starts one selected agent profile.
 - `src/client/demo_client.py`: discovers a card and invokes the agent.
+- `src/client/discover_and_invoke.py`: resolves an ERC-8004 identity before A2A invocation.
 - `src/erc8004/identity.py`: minimal client for the official Identity Registry.
+- `src/erc8004/registration.py`: validates identity binding and A2A service metadata.
 - `infra/erc8004/`: deployment entry point and protocol notes.
 - `scripts/`: reproducible local-chain setup, deployment, and registration commands.
 - `requirements.txt`: pins the direct runtime dependencies used by the demo.
-

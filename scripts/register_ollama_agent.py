@@ -1,47 +1,61 @@
-"""Register the Ollama A2A agent in the local ERC-8004 registry."""
-
-from __future__ import annotations
-
 import argparse
 import json
 from pathlib import Path
 
-from erc8004 import IdentityRegistryClient, LocalDeployment
+from erc8004.identity import IdentityRegistryClient, LocalDeployment
+from erc8004.registration import REGISTRATION_TYPE
 
+
+# Register the local Ollama agent in ERC-8004
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description="Register the Ollama A2A agent in local ERC-8004 registry"
+    )
+
     parser.add_argument(
         "--deployment",
         type=Path,
         default=Path("var/identity-deployment.json"),
-        help="deployment record written by deploy_erc8004_identity.sh",
+        help="Identity Registry deployment file written by deploy_erc8004_identity.sh",
     )
+
     parser.add_argument(
         "--output",
         type=Path,
         default=Path("var/registration.json"),
-        help="where to write the ERC-8004 registration document",
+        help="Path where registration.json will be created",
     )
+
     parser.add_argument(
         "--registration-url",
         default="http://127.0.0.1:8004/registration.json",
     )
+
     parser.add_argument(
         "--agent-card-url",
         default="http://127.0.0.1:8004/.well-known/agent-card.json",
     )
+
     args = parser.parse_args()
 
-    client = IdentityRegistryClient(LocalDeployment.from_path(args.deployment))
-    if client.deployment.chain_id != 31337:
-        raise RuntimeError("this checkpoint command is restricted to a local chain")
+    # Connect to the deployed Identity Registry
 
-    # register() assigns the ID. Only then can the document truthfully include
-    # that ID and be linked on-chain with setAgentURI().
+    client = IdentityRegistryClient(
+        LocalDeployment.from_path(args.deployment)
+    )
+
+    if client.deployment.chain_id != 31337:
+        raise RuntimeError(
+            "this checkpoint command is restricted to a local chain"
+        )
+
+    # Register the agent and obtain its agentId
     identity, register_tx = client.register()
+    
+    #Create registration.json using the assigned agentId
     document = {
-        "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+        "type": REGISTRATION_TYPE,
         "name": "summarizer-ollama",
         "description": "Ollama-backed A2A text summarization agent",
         "image": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E",
@@ -63,10 +77,23 @@ def main() -> None:
         "supportedTrust": [],
     }
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-    uri_tx = client.set_agent_uri(identity.agent_id, args.registration_url)
+    # Save registration.json
+    args.output.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    
+    )
+    args.output.write_text(
+        json.dumps(document, indent=2) + "\n",
+        encoding="utf-8"
+    )
 
+    #Store the registration.json URL on-chain
+    uri_tx = client.set_agent_uri(
+        identity.agent_id, args.registration_url
+    )
+
+    #Print registration result
     print(f"Agent:        {identity}")
     print(f"Registry:     {client.contract.address} (version {client.version()})")
     print(f"Owner:        {client.owner_of(identity.agent_id)}")

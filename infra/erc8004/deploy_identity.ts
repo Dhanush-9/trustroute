@@ -1,76 +1,142 @@
-/** Deploy the official ERC-8004 Identity Registry using its upstream pattern. */
+/* Deploy the official ERC-8004 Identity Registry */
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { network } from "hardhat";
 import { encodeFunctionData, zeroAddress } from "viem";
 
-const outputPath = process.env.TRUSTROUTE_DEPLOYMENT_OUTPUT;
-const upstreamCommit = process.env.TRUSTROUTE_ERC8004_COMMIT;
+// ----------------------------------------------
+// 1. Read configuration passed from shell script
+// ----------------------------------------------
 
-if (!outputPath || !upstreamCommit) {
-  throw new Error(
-    "TRUSTROUTE_DEPLOYMENT_OUTPUT and TRUSTROUTE_ERC8004_COMMIT are required",
-  );
+const deploymentPath = process.env.TRUSTROUTE_DEPLOYMENT_OUTPUT;
+const erc8004Commit = process.env.TRUSTROUTE_ERC8004_COMMIT;
+
+if (!deploymentPath || !erc8004Commit) {
+  throw new Error("Deployment path and ERC-8004 commit are required");
 }
 
-const { viem } = await network.connect();
-const publicClient = await viem.getPublicClient();
-const [owner] = await viem.getWalletClients();
 
-// The official registry is UUPS-upgradeable. 
-/* The proxy is created with the small upstream test implementation,
-  then upgraded to the real registry and initialized atomically.
-  Calls and durable state live at the proxy address. */
+// ----------------------------------------------
+// 2. Connect to local Hardhat blockchain
+// ----------------------------------------------
 
-const minimal = await viem.deployContract("HardhatMinimalUUPS");
-const minimalInit = encodeFunctionData({
-  abi: minimal.abi,
-  functionName: "initialize",
-  args: [zeroAddress],
+const hardhatConnection = await network.connect();
+
+const publicClient = await hardhatConnection.viem.getPublicClient();
+
+const walletClients = await hardhatConnection.viem.getWalletClients();
+const deployerWallet = walletClients[0];
+
+
+// ----------------------------------------------
+// 3. Deploy the temporary UUPS implementation
+// ----------------------------------------------
+
+const temporaryImpl = 
+    await hardhatConnection.viem.deployContract(
+        "HardhatMinimalUUPS"
+    );
+
+//prepare the encoded initialize(...) call
+const temporaryInitCall = encodeFunctionData({
+    abi: temporaryImpl.abi,
+    functionName: "initialize",
+    args: [zeroAddress],
 });
 
-//create proxy and point to temporary implementation
-const proxy = await viem.deployContract("ERC1967Proxy", [
-  minimal.address,
-  minimalInit,
-]);
 
-//real registry
-const implementation = await viem.deployContract(
-  "IdentityRegistryUpgradeable",
-);
-const minimalProxy = await viem.getContractAt(
-  "HardhatMinimalUUPS",
-  proxy.address,
-);
-const identityInit = encodeFunctionData({
-  abi: implementation.abi,
-  functionName: "initialize",
+// ----------------------------------------------
+// 4. Deploy the proxy
+// ----------------------------------------------
+
+const proxy = 
+    await hardhatConnection.viem.deployContract(
+        "ERC1967Proxy", 
+        [
+            temporaryImpl.address,
+            temporaryInitCall,
+        ]
+    );
+
+
+// ----------------------------------------------
+// 5. Deploy the real ERC-8004 Identity Registry
+// ----------------------------------------------
+
+const identityRegistryImpl = 
+    await hardhatConnection.viem.deployContract(
+        "IdentityRegistryUpgradeable"
+    );
+
+
+// ----------------------------------------------
+// 6. Talk to proxy using temporary UUPS interface
+// ----------------------------------------------
+
+const proxyAsTemporaryContract = 
+    await hardhatConnection.viem.getContractAt(
+        "HardhatMinimalUUPS",
+        proxy.address
+    );
+
+const identityRegistryInitCall = encodeFunctionData({
+    abi: identityRegistryImpl.abi,
+    functionName: "initialize",
 });
-const upgradeHash = await minimalProxy.write.upgradeToAndCall([
-  implementation.address,
-  identityInit,
-]);
-await publicClient.waitForTransactionReceipt({ hash: upgradeHash });
 
-const identity = await viem.getContractAt(
-  "IdentityRegistryUpgradeable",
-  proxy.address,
-);
+// ----------------------------------------------
+// 7. Upgrade the proxy to real Identity Registry
+// ----------------------------------------------
+
+const upgradeTransactionHash = 
+    await proxyAsTemporaryContract.write.upgradeToAndCall([
+        identityRegistryImpl.address,
+        identityRegistryInitCall,
+    ]);
+
+await publicClient.waitForTransactionReceipt({
+    hash: upgradeTransactionHash, 
+});
+
+// --------------------------------------------------
+// 8. Treat the proxy as the real Identity Registry
+// --------------------------------------------------
+
+const identityRegistry = 
+    await hardhatConnection.viem.getContractAt(
+        "IdentityRegistryUpgradeable",
+        proxy.address,
+    );
+
+// --------------------------------------------------
+// 9. Read and Save deployment information
+// --------------------------------------------------
+
 const chainId = await publicClient.getChainId();
-const version = await identity.read.getVersion();
+const registryVersion = await identityRegistry.read.getVersion();
 
-const deployment = {
+const deploymentInformation = {
   rpcUrl: "http://127.0.0.1:8545",
   chainId,
   identityRegistry: proxy.address,
-  implementation: implementation.address,
-  owner: owner.account.address,
-  version,
-  upstreamCommit,
+  implementation: identityRegistryImpl.address,
+  owner: deployerWallet.account.address,
+  version: registryVersion,
+  erc8004Commit,
 };
 
-await mkdir(dirname(outputPath), { recursive: true });
-await writeFile(outputPath, JSON.stringify(deployment, null, 2) + "\n", "utf8");
-console.log(JSON.stringify(deployment, null, 2));
+await mkdir(
+    dirname(deploymentPath), 
+    { recursive: true }
+);
+
+await writeFile(
+    deploymentPath,
+    JSON.stringify(deploymentInformation, null, 2) + "\n", 
+    "utf8"
+);
+
+console.log(
+    JSON.stringify(deploymentInformation, null, 2)
+);
