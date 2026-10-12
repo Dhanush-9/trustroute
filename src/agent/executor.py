@@ -1,7 +1,6 @@
 """Controlled and LLM-backed A2A executors."""
 
 import asyncio
-import os
 import time
 
 import httpx
@@ -81,10 +80,18 @@ class DeterministicSummarizer(AgentExecutor):
 class OllamaSummarizer(AgentExecutor):
     """Real summarization through a locally running Ollama server."""
 
-    def __init__(self, *, agent_name: str):
+    def __init__(
+        self,
+        *,
+        agent_name: str,
+        model: str,
+        host: str,
+        system_prompt: str,
+    ) -> None:
         self.agent_name = agent_name
-        self.model = os.getenv("OLLAMA_MODEL", "llama3.2")
-        self.host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        self.model = model
+        self.host = host.rstrip("/")
+        self.system_prompt = system_prompt
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         source = context.get_user_input()
@@ -101,7 +108,7 @@ class OllamaSummarizer(AgentExecutor):
                         "messages": [
                             {
                                 "role": "system",
-                                "content": "Summarize the text in short. Return only the summary.",
+                                "content": self.system_prompt,
                             },
                             {"role": "user", "content": source},
                         ],

@@ -19,6 +19,12 @@ fi
 # Install JavaScript dependencies
 npm --prefix "${ERC_DIR}" ci --legacy-peer-deps
 
+# Hardhat compiles contracts from its own project directory. Copy our local-only
+# payment token beside the pinned official ERC-8004 contracts before compiling.
+cp \
+  "${PROJECT_DIR}/infra/x402/TrustRouteMockUSDC.sol" \
+  "${ERC_DIR}/contracts/TrustRouteMockUSDC.sol"
+
 # Compile the smart contracts
 (
   cd "${ERC_DIR}"

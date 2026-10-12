@@ -4,3 +4,4 @@ protobuf==7.36.2
 starlette==1.7.0
 uvicorn==0.53.0
 web3==7.16.0
+x402[evm,fastapi,httpx]==2.25.0

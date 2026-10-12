@@ -1,0 +1,32 @@
+{
+  "name": "summarizer-ollama",
+  "description": "Ollama-backed A2A text summarization agent",
+  "version": "0.1.0",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8004,
+    "baseUrl": "http://127.0.0.1:8004"
+  },
+  "skill": {
+    "id": "summarize_text",
+    "name": "Summarize text",
+    "description": "Condenses a passage into a shorter summary.",
+    "tags": ["summarization", "text"]
+  },
+  "executor": {
+    "type": "ollama",
+    "host": "http://127.0.0.1:11434",
+    "model": "llama3.2",
+    "systemPrompt": "Summarize the text in short. Return only the summary."
+  },
+  "payment": {
+    "networkDeployment": "../../var/payment-network.json",
+    "priceAtomic": "30000",
+    "recipient": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "facilitatorUrl": "http://127.0.0.1:8402"
+  },
+  "registration": {
+    "documentPath": "../../var/agents/ollama-summarizer/registration.json",
+    "publicUrl": "http://127.0.0.1:8004/registration.json"
+  }
+}

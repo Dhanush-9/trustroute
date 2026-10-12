@@ -1,6 +1,7 @@
 """Build the HTTP application for an A2A service agent."""
 
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from a2a.server.agent_execution import AgentExecutor
@@ -12,6 +13,9 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+from x402.http.middleware.fastapi import PaymentMiddlewareASGI
+
+from agent.payment import AgentPaymentGate
 
 
 def build_app(
@@ -19,6 +23,7 @@ def build_app(
     executor: AgentExecutor,
     *,
     registration_document_path: Path | None = None,
+    payment_gate: AgentPaymentGate | None = None,
 ) -> Starlette:
     # The handler converts A2A requests into RequestContext objects for the
     # executor. The in-memory store is sufficient for this local baseline.
@@ -57,4 +62,21 @@ def build_app(
 
         routes.append(Route("/registration.json", registration_document))
 
-    return Starlette(routes=routes)
+    @asynccontextmanager
+    async def lifespan(_: Starlette):
+        try:
+            yield
+        finally:
+            if payment_gate is not None:
+                await payment_gate.close()
+
+    app = Starlette(routes=routes, lifespan=lifespan)
+
+    if payment_gate is not None:
+        app.add_middleware(
+            PaymentMiddlewareASGI,
+            routes=payment_gate.paid_routes,
+            server=payment_gate.resource_server,
+        )
+
+    return app

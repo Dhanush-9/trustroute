@@ -1,0 +1,25 @@
+{
+  "name": "summarizer-accurate",
+  "description": "Controlled high-retention summarization test fixture",
+  "version": "0.1.0",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8002,
+    "baseUrl": "http://127.0.0.1:8002"
+  },
+  "skill": {
+    "id": "summarize_text",
+    "name": "Summarize text",
+    "description": "Condenses a passage into a shorter summary.",
+    "tags": ["summarization", "text", "test-fixture"]
+  },
+  "executor": {
+    "type": "deterministic",
+    "latencyMs": 2000,
+    "retentionRatio": 0.8
+  },
+  "testListing": {
+    "amount": "0.05",
+    "asset": "USDC"
+  }
+}

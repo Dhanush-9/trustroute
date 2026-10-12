@@ -1,133 +1,188 @@
 # TrustRoute
-
-This repository contains a small A2A summarization demo and a local ERC-8004 identity slice. Four agent profiles (`fast`, `accurate`, `new`, and `ollama`) expose the same A2A interface. The first three use controlled, repeatable behavior; `ollama` uses a locally running model. Checkpoint 2A registers the Ollama agent in an actual official ERC-8004 Identity Registry deployed on a local Hardhat chain.
-
+ 
+TrustRoute is a prototype for identity-rooted discovery, payment and invocation
+of A2A agents. An agent is registered in an ERC-8004 identity registry, a client
+resolves it from its `agentId`, pays for the call through x402, and receives the
+result over A2A.
+ 
+## Status
+ 
+Working: a real Ollama-backed agent is registered on a local chain, resolved by
+its `agentId`, paid with a local test token, and invoked end to end.
+ 
+Not yet implemented: registry indexing, multi-agent selection, reputation
+feedback and attack experiments. The client currently resolves one known
+`agentId`.
+ 
+## Architecture
+ 
+```text
+ERC-8004 Identity Registry
+  -> agentURI
+  -> registration document
+  -> A2A AgentCard
+  -> paid A2A endpoint
+ 
+Client                         Agent                         Facilitator
+------                         -----                         -----------
+payer wallet                   A2A executor                  settlement key
+independent maximum budget     price and recipient           /supported
+checks ERC-8004 agentWallet    x402 resource server          /verify
+signs authorization            invokes Ollama                /settle
+```
+ 
+Each role owns only what it needs. The client refuses an x402 offer whose
+`payTo` differs from the agent's ERC-8004 `agentWallet`, and its budget is
+independent of the price the agent asks.
+ 
+## Requirements
+ 
+- Python 3.10+
+- Node.js and npm (for the local Hardhat chain)
+- [Ollama](https://ollama.com)
 ## Setup
-
-Requires Python 3.10+. Create a virtual environment and install the pinned
-runtime dependencies from the project root:
-
+ 
+From the repository root:
+ 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m pip check
-```
-
-For the `ollama` profile, run Ollama locally and make the `llama3.2` model available. You can override the defaults with `OLLAMA_HOST` and `OLLAMA_MODEL`.
-
-## Run the demo
-
-Open two terminals in the project root and activate the virtual environment in each. In the first terminal:
-
-```bash
-cd src
-python -m agent.run_agent fast
-```
-
-In the second terminal:
-
-```bash
-cd src
-python -m client.demo_client \
-  --url http://localhost:8001 \
-  --message "TrustRoute uses A2A for agent communication."
-```
-
-Omit `--message` to paste multiline text interactively and press Enter twice
-to submit it. Start `accurate`, `new`, or `ollama` instead to try another
-profile. Their local ports are 8002, 8003, and 8004 respectively.
-
-## What the client does
-
-The client starts with a known service location. It then performs this A2A flow:
-
-```text
-explicit base URL
-    1. GET /.well-known/agent-card.json
-    2. inspect the advertised interface and skills
-    3. construct SendMessageRequest
-    4. send the JSON-RPC request
-    5. receive an A2A message
-    6. display its context ID, task ID, and text
-```
-
-This is **AgentCard resolution**, not marketplace discovery. Resolution asks
-an already-known service for its card. Discovery would first determine which
-agent and endpoint should be considered; ERC-8004 will provide that connection later.
-
-The card's USDC price is also self-declared discovery metadata. It is not an
-x402 payment requirement and no payment occurs in this checkpoint.
-
-## Checkpoint 2A: local ERC-8004 identity
-
-This checkpoint adds identity registration without yet changing the A2A client. Its visible result is one real on-chain ERC-721 identity whose `agentURI` points to a registration document served by the Ollama agent.
-
-### One-time setup
-
-```bash
 scripts/setup_erc8004.sh
+ollama pull llama3.2
 ```
-
-### Run the identity flow
-
-Use four terminals in the repository root. First start the local chain:
-
+ 
+### Keys
+ 
+Private keys live only in an ignored `.env.local` file:
+ 
+```bash
+cp .env.example .env.local
+```
+ 
+When the Hardhat node starts (step 1 below) it prints funded development
+accounts. Fill `.env.local` with:
+ 
+| Variable                             | Hardhat account |
+| ------------------------------------ | --------------- |
+| `TRUSTROUTE_AGENT_OWNER_PRIVATE_KEY` | 0               |
+| `TRUSTROUTE_PAYER_PRIVATE_KEY`       | 1               |
+| `TRUSTROUTE_FACILITATOR_PRIVATE_KEY` | 2               |
+ 
+These are public development keys. Never use them, or fund their addresses, on a
+public network.
+ 
+## Run the demo
+ 
+Use one terminal per step, each in the repository root with the virtual
+environment active. Run `source .env.local` only where shown, so that the agent
+process never holds the payer or facilitator keys.
+ 
+**1. Start the local chain**
+ 
 ```bash
 scripts/start_erc8004_node.sh
 ```
-
-Deploy the official Identity Registry proxy and implementation:
-
+ 
+**2. Deploy the contracts**
+ 
 ```bash
 scripts/deploy_erc8004_identity.sh
+scripts/deploy_x402_local.sh
 ```
-
-Start the Ollama-backed A2A service:
-
+ 
+The second script deploys a valueless test token (trUSDC), mints 100 to the
+payer, and writes chain and token details to `var/payment-network.json`.
+ 
+**3. Start the facilitator**
+ 
 ```bash
-cd src
-python -m agent.run_agent ollama
+source .env.local
+PYTHONPATH=src python -m facilitator.run_facilitator \
+  --config configs/facilitator/local.json
 ```
-
-Finally, from the repository root, mint the identity, generate its registration document, and set its on-chain URI:
-
+ 
+It serves `GET /supported`, `POST /verify` and `POST /settle`, and must be
+running before the agent starts.
+ 
+**4. Start the agent**
+ 
 ```bash
-PYTHONPATH=src python scripts/register_ollama_agent.py
+PYTHONPATH=src python -m agent.run_agent \
+  --config configs/agents/ollama-summarizer.json
 ```
-
-## Checkpoint 2B: discover and invoke from identity
-
-With the local chain and Ollama agent still running, invoke the registered agent
-without supplying its service URL:
-
+ 
+**5. Register the agent**
+ 
 ```bash
-PYTHONPATH=src python -m client.discover_and_invoke \
+source .env.local
+PYTHONPATH=src python scripts/register_agent.py \
+  --config configs/agents/ollama-summarizer.json
+```
+ 
+This validates the live AgentCard, registers the agent with the owner's key,
+writes its registration document, sets the on-chain `agentURI`, and checks that
+owner, `agentWallet` and payment recipient match. It prints the assigned
+`agentId`.
+ 
+**6. Resolve, pay and invoke**
+ 
+```bash
+source .env.local
+PYTHONPATH=src python -m client.resolve_and_invoke \
   --agent-id 0 \
-  --message "ERC-8004 identifies the agent and A2A invokes it."
+  --policy configs/client/local-client.json \
+  --message "ERC-8004 identifies, x402 pays, and A2A invokes this agent."
 ```
+ 
+Use the `agentId` printed in step 5. The client:
+ 
+```text
+reads owner, agentWallet and agentURI from ERC-8004
+  -> validates the registration document and resolves the AgentCard
+  -> sends an unpaid request and receives HTTP 402
+  -> checks network, token, maximum amount and recipient
+  -> signs one EIP-3009 authorization and retries
+  -> agent verifies with the facilitator, runs Ollama, then settles
+  -> client prints the response and the settlement transaction
+```
+ 
+### Budget rejection
+ 
+This policy allows less than the agent's price (20,000 against 30,000 atomic
+units):
+ 
+```bash
+source .env.local
+PYTHONPATH=src python -m client.resolve_and_invoke \
+  --agent-id 0 \
+  --policy configs/client/low-budget.json \
+  --message "This request should be rejected before signing."
+```
+ 
+No authorization is signed, no payment is made, and balances do not change.
 
-The client starts from the deployment record and numeric agent ID. It reads the
-owner, agent wallet, and `agentURI` from the registry; fetches the registration
-document; verifies that the document refers back to the same chain, registry,
-and agent ID; selects its single A2A service; resolves the AgentCard; and sends
-the message through the existing A2A client path.
-
-This is identity-rooted discovery, not marketplace search. The client is told
-which identity to resolve; it does not yet enumerate, compare, or rank agents.
-No payment occurs even if an AgentCard advertises a price. A real x402 challenge
-and payment flow belongs to the next checkpoint.
-
+## Configuration
+ 
+| Location                | Contents                                                      | Owner          |
+| ----------------------- | ------------------------------------------------------------- | -------------- |
+| `var/payment-network.json` | Chain and token details (generated, ignored)               | Deploy script  |
+| `configs/agents/`       | Executor, skill, price, recipient, registration document path | Agent operator |
+| `configs/client/`       | Payer address and maximum payment                             | Client         |
+| `configs/facilitator/`  | Facilitator URL, signer address, network reference            | Facilitator    |
+| `.env.local`            | Private keys (ignored)                                        | Each runtime   |
+ 
+Public addresses are configuration, not secrets. Private keys never go in JSON
+files or the deployment record.
+ 
 ## Layout
-
-- `src/agent/cards.py`: builds A2A AgentCards and marketplace discovery metadata.
-- `src/agent/executor.py`: controlled and Ollama backed summarizers.
-- `src/agent/server.py`: creates the A2A HTTP application.
-- `src/agent/run_agent.py`: starts one selected agent profile.
-- `src/client/demo_client.py`: discovers a card and invokes the agent.
-- `src/client/discover_and_invoke.py`: resolves an ERC-8004 identity before A2A invocation.
-- `src/erc8004/identity.py`: minimal client for the official Identity Registry.
-- `src/erc8004/registration.py`: validates identity binding and A2A service metadata.
-- `infra/erc8004/`: deployment entry point and protocol notes.
-- `scripts/`: reproducible local-chain setup, deployment, and registration commands.
-- `requirements.txt`: pins the direct runtime dependencies used by the demo.
+ 
+- `src/agent/`: AgentCard, executors, operator config, seller payment policy,
+  A2A server
+- `src/client/`: resolution, budget policy, payer signing, A2A invocation
+- `src/facilitator/`: x402 verification and settlement service
+- `src/erc8004/`: Identity Registry client and registration documents
+- `src/x402_support/`: shared network and token data
+- `configs/`: non-secret, role-specific configuration
+- `infra/`: Solidity token contract and deployment entry points
+- `scripts/`: setup, deployment and registration commands

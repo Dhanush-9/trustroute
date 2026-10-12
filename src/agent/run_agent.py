@@ -1,105 +1,111 @@
-"""Start one TrustRoute A2A summarization profile."""
+"""Start one TrustRoute A2A agent from an operator-owned configuration file."""
 
-import os
-import sys
+import argparse
 from pathlib import Path
 
 import uvicorn
 
 from agent.cards import build_agent_card, marketplace_extension
+from agent.config import AgentConfig
 from agent.executor import DeterministicSummarizer, OllamaSummarizer
+from agent.payment import build_payment_gate
 from agent.server import build_app
-
-PROFILES = {
-    "fast": {
-        "port": 8001, 
-        "price": 0.01, 
-        "latency_ms": 100, 
-        "retention_ratio": 0.30
-    },
-
-    "accurate": {
-        "port": 8002,
-        "price": 0.05,
-        "latency_ms": 2000,
-        "retention_ratio": 0.80
-    },
-
-    "new": {
-        "port": 8003,
-        "price": 0.02,
-        "latency_ms": 800, 
-        "retention_ratio": 0.60
-    },
-
-    "ollama": {
-        "port": 8004,
-        "price": 0.03
-    },
-}
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from x402_support.network import PaymentNetwork
 
 
-def main(profile: str) -> None:
-    # Profiles make controlled cost, delay, and retention settings explicit.
-    config = PROFILES[profile]
+def _build_executor(config: AgentConfig):
+    if config.executor.executor_type == "ollama":
+        return OllamaSummarizer(
+            agent_name=config.name,
+            model=config.executor.model or "",
+            host=config.executor.host or "",
+            system_prompt=config.executor.system_prompt or "",
+        )
 
-    url = f"http://localhost:{config['port']}/"
-    name = f"summarizer-{profile}"
-
-    card = build_agent_card(
-        name=name,
-        description=f"Text summarization agent ({profile} profile).",
-        url=url,
-        skill_id="summarize_text",
-        skill_name="Summarize text",
-        skill_description="Condenses a passage into a shorter summary.",
-        tags=["summarization", "text"],
-        listing=marketplace_extension(advertised_price_usdc=config["price"]),
+    return DeterministicSummarizer(
+        agent_name=config.name,
+        latency_ms=config.executor.latency_ms or 0,
+        retention_ratio=config.executor.retention_ratio or 1,
     )
 
-    if profile == "ollama":
-        executor = OllamaSummarizer(agent_name=name)
-        registration_document_path = Path(
-            os.environ.get(
-                "TRUSTROUTE_REGISTRATION_PATH",
-                str(PROJECT_ROOT / "var" / "registration.json"),
-            )
-        )
 
+def run(config_path: Path) -> None:
+    config = AgentConfig.from_path(config_path)
+    payment_gate = None
+
+    if config.payment is not None:
+        network = PaymentNetwork.from_path(config.payment.network_deployment)
+        displayed_price = network.display_amount(config.payment.price_atomic)
+        listing = marketplace_extension(
+            advertised_price=displayed_price,
+            advertised_asset=network.asset_symbol,
+            authority="agent-payment-config",
+        )
+        payment_gate = build_payment_gate(network, config.payment)
+    elif config.test_listing is not None:
+        listing = marketplace_extension(
+            advertised_price=config.test_listing.amount,
+            advertised_asset=config.test_listing.asset,
+            authority=config.test_listing.authority,
+        )
     else:
-        executor = DeterministicSummarizer(
-            agent_name=name,
-            latency_ms=config["latency_ms"],
-            retention_ratio=config["retention_ratio"],
-        )
-        registration_document_path = None
+        listing = None
 
-    print(f"{name} -> {url}.well-known/agent-card.json")
+    card = build_agent_card(
+        name=config.name,
+        description=config.description,
+        url=f"{config.base_url}/",
+        skill_id=config.skill.skill_id,
+        skill_name=config.skill.name,
+        skill_description=config.skill.description,
+        tags=list(config.skill.tags),
+        listing=listing,
+        version=config.version,
+    )
+    registration_path = (
+        config.registration.document_path if config.registration is not None else None
+    )
+    app = build_app(
+        card,
+        _build_executor(config),
+        registration_document_path=registration_path,
+        payment_gate=payment_gate,
+    )
+
+    print(f"Agent: {config.name}")
+    print(f"AgentCard: {config.agent_card_url}")
+    if config.payment is not None:
+        print(
+            f"Price: {displayed_price} {network.asset_symbol} "
+            f"({config.payment.price_atomic} atomic units)"
+        )
+        print(f"Payment recipient: {config.payment.recipient}")
+        print(f"Facilitator: {config.payment.facilitator_url}")
+        print(f"Registration file: {registration_path}")
+
     uvicorn.run(
-        build_app(
-            card,
-            executor,
-            registration_document_path=registration_document_path,
-        ),
-        host="127.0.0.1",
-        port=config["port"],
+        app,
+        host=config.host,
+        port=config.port,
         log_level="warning",
     )
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--config",
+        required=True,
+        type=Path,
+        help="agent configuration file",
+    )
+    args = parser.parse_args()
+
+    try:
+        run(args.config)
+    except (ConnectionError, FileNotFoundError, KeyError, ValueError) as error:
+        parser.exit(1, f"Agent startup failed: {error}\n")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python run_agent.py <profile>")
-        print(f"Available profiles: {', '.join(PROFILES)}")
-        sys.exit(1)
-
-    profile = sys.argv[1]
-
-    if profile not in PROFILES:
-        print(f"Unknown profile: {profile}")
-        print(f"Available profiles: {', '.join(PROFILES)}")
-        sys.exit(1)
-
-    main(profile)
+    main()

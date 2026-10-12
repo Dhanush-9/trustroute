@@ -17,11 +17,20 @@ def _agent_card_url(base_url: str) -> str:
     return f"{base_url.rstrip('/')}/.well-known/agent-card.json"
 
 
-async def invoke(base_url: str, source: str) -> None:
+async def invoke(
+    base_url: str,
+    source: str,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> None:
     """Resolve the AgentCard, display it, and send one A2A message."""
 
     # Local requests should not be redirected through a system HTTP proxy.
-    async with httpx.AsyncClient(timeout=120, trust_env=False) as http:
+    async with httpx.AsyncClient(
+        timeout=120,
+        trust_env=False,
+        transport=transport,
+    ) as http:
         resolver = A2ACardResolver(
             httpx_client=http,
             base_url=base_url.rstrip("/"),
@@ -45,7 +54,12 @@ async def invoke(base_url: str, source: str) -> None:
         if listing is None:
             print("Advertised price: not provided")
         else:
-            print(f"Advertised price: {listing.get('advertised_price_usdc')} USDC")
+            print(
+                "Advertised price: "
+                f"{listing.get('advertised_price')} "
+                f"{listing.get('advertised_asset')}"
+            )
+            print(f"Listing authority: {listing.get('listing_authority')}")
             print(f"Price authority: {listing.get('authoritative_quote')}")
 
         client = await create_client(card, ClientConfig(httpx_client=http))
@@ -57,7 +71,9 @@ async def invoke(base_url: str, source: str) -> None:
             async for chunk in client.send_message(request):
                 if chunk.HasField("message"):
                     received_message = True
-                    round_trip_ms = round( (time.perf_counter() - start_time) * 1000 )
+                    round_trip_ms = round(
+                        (time.perf_counter() - start_time) * 1000
+                    )
                     print(f"Context ID: {chunk.message.context_id}")
                     print(f"Task ID: {chunk.message.task_id}")
                     print(f"Client-observed invocation: {round_trip_ms} ms")

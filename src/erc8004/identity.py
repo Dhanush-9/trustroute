@@ -2,12 +2,15 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from eth_account import Account
+from eth_account.signers.local import LocalAccount
 from web3 import Web3
 from web3.contract import Contract
 from web3.logs import DISCARD
 
 
-# Minimal ABI containing only the Identity Registry functions we use
+# Minimal ABI containing only the official Identity Registry functions we use.
+# An ABI is a machine-readable contract interface, not deployed bytecode.
 
 IDENTITY_REGISTRY_ABI = [
     {
@@ -68,11 +71,8 @@ IDENTITY_REGISTRY_ABI = [
 ]
 
 
-# Data classes used to represent Identity Registry information
-
 @dataclass(frozen=True, slots=True)
 class AgentIdentity:
-
     chain_id: int
     registry_address: str
     agent_id: int
@@ -119,25 +119,29 @@ class LocalDeployment:
         )
 
 
-# Client used to communicate with the deployed Identity Registry
-
 class IdentityRegistryClient:
     """Read and write one deployed ERC-8004 Identity Registry contract."""
 
-    def __init__(self, deployment: LocalDeployment) -> None:
+    def __init__(
+        self,
+        deployment: LocalDeployment,
+        *,
+        private_key: str | None = None,
+    ) -> None:
         self.deployment = deployment
+        self._account: LocalAccount | None = (
+            Account.from_key(private_key) if private_key is not None else None
+        )
 
         # Connect Python to the local Hardhat blockchain
-        self.web3 = Web3(
-            Web3.HTTPProvider(deployment.rpc_url)
-        )
+        self.web3 = Web3(Web3.HTTPProvider(deployment.rpc_url))
 
         if not self.web3.is_connected():
             raise ConnectionError(
                 f"cannot connect to EVM RPC at {deployment.rpc_url}"
             )
 
-        # Make sure we connected to the expected blockchain
+        # Make sure we connected to the expected blockchain.
         actual_chain_id = self.web3.eth.chain_id
 
         if actual_chain_id != deployment.chain_id:
@@ -145,7 +149,7 @@ class IdentityRegistryClient:
                 f"deployment says chain {deployment.chain_id} but the RPC reports {actual_chain_id}"
             )
 
-        # The proxy address is the address clients interact with
+        # The proxy address is the address clients interact with.
         registry_address = self.web3.to_checksum_address(
             deployment.identity_registry
         )
@@ -155,7 +159,7 @@ class IdentityRegistryClient:
                 f"no contract code exists at Identity Registry {registry_address}"
             )
 
-        # Create a Python interface to the Identity Registry contract
+        # Create a Python interface to the Identity Registry contract.
         self.contract: Contract = self.web3.eth.contract(
             address=registry_address,
             abi=IDENTITY_REGISTRY_ABI,
@@ -163,33 +167,43 @@ class IdentityRegistryClient:
 
 
     @property
-    def local_account(self) -> str:
-        # Use Hardhat's first unlocked account for local transactions
-        accounts = self.web3.eth.accounts
-
-        if not accounts:
-            raise RuntimeError(
-                "the RPC does not expose an unlocked local account"
-            )
-        
-        return accounts[0]
+    def signer_address(self) -> str:
+        if self._account is None:
+            raise RuntimeError("a private key is required for registry writes")
+        return self._account.address
 
 
-    # Register a new agent and obtain the agentId assigned by the registry
+    def _send_transaction(self, contract_function) -> tuple[str, object]:
+        """Sign locally instead of relying on an unlocked RPC account."""
+
+        if self._account is None:
+            raise RuntimeError("a private key is required for registry writes")
+
+        transaction = contract_function.build_transaction(
+            {
+                "from": self._account.address,
+                "chainId": self.deployment.chain_id,
+                "nonce": self.web3.eth.get_transaction_count(
+                    self._account.address, "pending"
+                ),
+                "gasPrice": self.web3.eth.gas_price,
+            }
+        )
+        signed = self._account.sign_transaction(transaction)
+        tx_hash = self.web3.eth.send_raw_transaction(signed.raw_transaction)
+        receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash)
+        return self.web3.to_hex(tx_hash), receipt
+
 
     def register(self) -> tuple[AgentIdentity, str]:
-
-        tx_hash = self.contract.functions.register().transact(
-            {"from": self.local_account}
-        )
-
-        receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash)
+        """Register a new agent and return its identity and transaction hash."""
+        tx_hash, receipt = self._send_transaction(self.contract.functions.register())
         if receipt.status != 1:
             raise RuntimeError(
                 "ERC-8004 registration transaction reverted"
             )
 
-        # register() emits a Registered event containing the new agentId
+        # register() emits a Registered event containing the assigned agentId.
         events = self.contract.events.Registered().process_receipt(
             receipt,
             errors=DISCARD,
@@ -206,53 +220,33 @@ class IdentityRegistryClient:
             agent_id=int(events[0]["args"]["agentId"]),
         )
 
-        return identity, self.web3.to_hex(tx_hash)
+        return identity, tx_hash
 
-
-    # Store the registration.json URI for an existing agent
 
     def set_agent_uri(self, agent_id: int, uri: str) -> str:
-
-        tx_hash = self.contract.functions.setAgentURI(agent_id, uri).transact(
-            {"from": self.local_account}
+        """Store the off-chain registration-document URI for an agent."""
+        tx_hash, receipt = self._send_transaction(
+            self.contract.functions.setAgentURI(agent_id, uri)
         )
-
-        receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash)
         if receipt.status != 1:
-            raise RuntimeError(
-                "setAgentURI transaction reverted"
-            )
-        
-        return self.web3.to_hex(tx_hash)
+            raise RuntimeError("setAgentURI transaction reverted")
 
-
-    # Read information from the Identity Registry
+        return tx_hash
 
     def owner_of(self, agent_id: int) -> str:
-        return str(
-            self.contract.functions.ownerOf(agent_id).call()
-        )
+        return str(self.contract.functions.ownerOf(agent_id).call())
 
     def token_uri(self, agent_id: int) -> str:
-        return str(
-            self.contract.functions.tokenURI(agent_id).call()
-        )
+        return str(self.contract.functions.tokenURI(agent_id).call())
 
     def agent_wallet(self, agent_id: int) -> str:
-        return str(
-            self.contract.functions.getAgentWallet(agent_id).call()
-        )
+        return str(self.contract.functions.getAgentWallet(agent_id).call())
 
     def version(self) -> str:
-        return str(
-            self.contract.functions.getVersion().call()
-        )
-
-
-    # Read all useful on-chain information for one registered agent
+        return str(self.contract.functions.getVersion().call())
 
     def read_agent(self, agent_id: int) -> RegisteredAgent:
-
+        """Read the useful identity fields for one registered agent."""
         identity = AgentIdentity(
             chain_id=self.deployment.chain_id,
             registry_address=str(self.contract.address),
