@@ -1,23 +1,25 @@
 {
   "name": "summarizer-new",
   "description": "Controlled cold-start summarization test fixture",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "server": {
     "host": "127.0.0.1",
     "port": 8003,
     "baseUrl": "http://127.0.0.1:8003"
   },
-  "skill": {
-    "id": "summarize_text",
-    "name": "Summarize text",
-    "description": "Condenses a passage into a shorter summary.",
-    "tags": ["summarization", "text", "test-fixture"]
-  },
-  "executor": {
-    "type": "deterministic",
-    "latencyMs": 800,
-    "retentionRatio": 0.6
-  },
+  "skills": [
+    {
+      "id": "summarize_text",
+      "name": "Summarize text",
+      "description": "Condenses a passage into a shorter summary.",
+      "tags": ["summarization", "text", "test-fixture"],
+      "executor": {
+        "type": "deterministic",
+        "latencyMs": 800,
+        "retentionRatio": 0.6
+      }
+    }
+  ],
   "testListing": {
     "amount": "0.02",
     "asset": "USDC"

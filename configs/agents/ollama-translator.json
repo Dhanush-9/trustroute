@@ -1,0 +1,59 @@
+{
+  "name": "ollama-translator",
+  "description": "Ollama-backed text agent configured with a translation emphasis",
+  "version": "0.2.0",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8005,
+    "baseUrl": "http://127.0.0.1:8005"
+  },
+  "skills": [
+    {
+      "id": "summarize_text",
+      "name": "Summarize text",
+      "description": "Condenses a passage into a shorter factual summary.",
+      "tags": ["summarization", "text"],
+      "executor": {
+        "type": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "llama3.2",
+        "systemPrompt": "Write a short summary of the supplied text. Return only the summary."
+      }
+    },
+    {
+      "id": "translate_text",
+      "name": "Translate text",
+      "description": "Translates text into the target language named by the user.",
+      "tags": ["translation", "text"],
+      "executor": {
+        "type": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "llama3.2",
+        "systemPrompt": "Act as a careful professional translator. Translate into the requested target language while preserving meaning, tone, names, numbers, and formatting. Return only the translation."
+      }
+    },
+    {
+      "id": "generate_code",
+      "name": "Generate code",
+      "description": "Generates source code from a textual programming request.",
+      "tags": ["code", "generation"],
+      "executor": {
+        "type": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "llama3.2",
+        "systemPrompt": "Provide a simple code solution to the request and state any assumptions briefly."
+      }
+    }
+  ],
+  "payment": {
+    "networkDeployment": "../../var/payment-network.json",
+    "priceAtomic": "25000",
+    "recipient": "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+    "facilitatorUrl": "http://127.0.0.1:8402"
+  },
+  "registration": {
+    "documentPath": "../../var/agents/ollama-translator/registration.json",
+    "publicUrl": "http://127.0.0.1:8005/registration.json",
+    "ownerKeyEnv": "TRUSTROUTE_TRANSLATOR_OWNER_PRIVATE_KEY"
+  }
+}

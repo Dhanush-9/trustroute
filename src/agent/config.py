@@ -37,21 +37,24 @@ def _resolve_path(config_path: Path, value: str) -> Path:
 
 
 @dataclass(frozen=True, slots=True)
-class SkillConfig:
-    skill_id: str
-    name: str
-    description: str
-    tags: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class ExecutorConfig:
+    """Implementation used for one advertised skill."""
+
     executor_type: str
     model: str | None = None
     host: str | None = None
     system_prompt: str | None = None
     latency_ms: int | None = None
     retention_ratio: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SkillConfig:
+    skill_id: str
+    name: str
+    description: str
+    tags: tuple[str, ...]
+    executor: ExecutorConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +69,7 @@ class AgentPaymentConfig:
 class AgentRegistrationConfig:
     document_path: Path
     public_url: str
+    owner_key_env: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +77,72 @@ class AdvertisedListing:
     amount: str
     asset: str
     authority: str
+
+
+def _parse_executor(skill_data: dict, skill_index: int) -> ExecutorConfig:
+    field = f"skills[{skill_index}].executor"
+    executor_data = _require_object(skill_data, "executor")
+    executor_type = _require_string(executor_data, "type")
+
+    if executor_type == "ollama":
+        return ExecutorConfig(
+            executor_type=executor_type,
+            model=_require_string(executor_data, "model"),
+            host=_require_http_url(
+                _require_string(executor_data, "host"),
+                f"{field}.host",
+            ),
+            system_prompt=_require_string(executor_data, "systemPrompt"),
+        )
+
+    if executor_type == "deterministic":
+        latency_ms = int(executor_data["latencyMs"])
+        retention_ratio = float(executor_data["retentionRatio"])
+        if latency_ms < 0:
+            raise ValueError(f"{field}.latencyMs must be non-negative")
+        if not 0 < retention_ratio <= 1:
+            raise ValueError(f"{field}.retentionRatio must be in (0, 1]")
+        return ExecutorConfig(
+            executor_type=executor_type,
+            latency_ms=latency_ms,
+            retention_ratio=retention_ratio,
+        )
+
+    raise ValueError(f"unsupported executor type: {executor_type}")
+
+
+def _parse_skills(data: dict) -> tuple[SkillConfig, ...]:
+    raw_skills = data.get("skills")
+    if not isinstance(raw_skills, list) or not raw_skills:
+        raise ValueError("agent configuration field 'skills' must be a non-empty list")
+
+    skills: list[SkillConfig] = []
+    for index, skill_data in enumerate(raw_skills):
+        if not isinstance(skill_data, dict):
+            raise ValueError(f"agent skills[{index}] must be an object")
+
+        raw_tags = skill_data.get("tags")
+        if not isinstance(raw_tags, list) or not raw_tags or not all(
+            isinstance(tag, str) and tag.strip() for tag in raw_tags
+        ):
+            raise ValueError(
+                f"agent skills[{index}].tags must be a non-empty string list"
+            )
+
+        skills.append(
+            SkillConfig(
+                skill_id=_require_string(skill_data, "id"),
+                name=_require_string(skill_data, "name"),
+                description=_require_string(skill_data, "description"),
+                tags=tuple(raw_tags),
+                executor=_parse_executor(skill_data, index),
+            )
+        )
+
+    skill_ids = [skill.skill_id for skill in skills]
+    if len(skill_ids) != len(set(skill_ids)):
+        raise ValueError("agent skill IDs must be unique")
+    return tuple(skills)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,8 +156,7 @@ class AgentConfig:
     host: str
     port: int
     base_url: str
-    skill: SkillConfig
-    executor: ExecutorConfig
+    skills: tuple[SkillConfig, ...]
     payment: AgentPaymentConfig | None
     registration: AgentRegistrationConfig | None
     test_listing: AdvertisedListing | None
@@ -96,49 +165,19 @@ class AgentConfig:
     def agent_card_url(self) -> str:
         return f"{self.base_url}/.well-known/agent-card.json"
 
+    @property
+    def skill_ids(self) -> tuple[str, ...]:
+        return tuple(skill.skill_id for skill in self.skills)
+
     @classmethod
     def from_path(cls, path: Path | str) -> "AgentConfig":
         source_path = Path(path).resolve()
         data = json.loads(source_path.read_text(encoding="utf-8"))
-
         server = _require_object(data, "server")
-        skill_data = _require_object(data, "skill")
-        executor_data = _require_object(data, "executor")
-
-        raw_tags = skill_data.get("tags")
-        if not isinstance(raw_tags, list) or not raw_tags or not all(
-            isinstance(tag, str) and tag.strip() for tag in raw_tags
-        ):
-            raise ValueError("agent skill tags must be a non-empty string list")
 
         port = int(server["port"])
         if not 1 <= port <= 65535:
             raise ValueError("agent server port must be between 1 and 65535")
-
-        executor_type = _require_string(executor_data, "type")
-        if executor_type == "ollama":
-            executor = ExecutorConfig(
-                executor_type=executor_type,
-                model=_require_string(executor_data, "model"),
-                host=_require_http_url(
-                    _require_string(executor_data, "host"), "executor.host"
-                ),
-                system_prompt=_require_string(executor_data, "systemPrompt"),
-            )
-        elif executor_type == "deterministic":
-            latency_ms = int(executor_data["latencyMs"])
-            retention_ratio = float(executor_data["retentionRatio"])
-            if latency_ms < 0:
-                raise ValueError("deterministic latencyMs must be non-negative")
-            if not 0 < retention_ratio <= 1:
-                raise ValueError("deterministic retentionRatio must be in (0, 1]")
-            executor = ExecutorConfig(
-                executor_type=executor_type,
-                latency_ms=latency_ms,
-                retention_ratio=retention_ratio,
-            )
-        else:
-            raise ValueError(f"unsupported executor type: {executor_type}")
 
         payment = None
         payment_data = data.get("payment")
@@ -177,6 +216,7 @@ class AgentConfig:
                     _require_string(registration_data, "publicUrl"),
                     "registration.publicUrl",
                 ),
+                owner_key_env=_require_string(registration_data, "ownerKeyEnv"),
             )
 
         if (payment is None) != (registration is None):
@@ -207,13 +247,7 @@ class AgentConfig:
             base_url=_require_http_url(
                 _require_string(server, "baseUrl"), "server.baseUrl"
             ),
-            skill=SkillConfig(
-                skill_id=_require_string(skill_data, "id"),
-                name=_require_string(skill_data, "name"),
-                description=_require_string(skill_data, "description"),
-                tags=tuple(raw_tags),
-            ),
-            executor=executor,
+            skills=_parse_skills(data),
             payment=payment,
             registration=registration,
             test_listing=test_listing,

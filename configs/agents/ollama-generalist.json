@@ -1,0 +1,59 @@
+{
+  "name": "ollama-generalist",
+  "description": "General-purpose Ollama-backed text agent",
+  "version": "0.2.0",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8004,
+    "baseUrl": "http://127.0.0.1:8004"
+  },
+  "skills": [
+    {
+      "id": "summarize_text",
+      "name": "Summarize text",
+      "description": "Condenses a passage into a shorter factual summary.",
+      "tags": ["summarization", "text"],
+      "executor": {
+        "type": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "llama3.2",
+        "systemPrompt": "Summarize the supplied text concisely and accurately. Return only the summary."
+      }
+    },
+    {
+      "id": "translate_text",
+      "name": "Translate text",
+      "description": "Translates text into the target language named by the user.",
+      "tags": ["translation", "text"],
+      "executor": {
+        "type": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "llama3.2",
+        "systemPrompt": "Translate the supplied text into the target language requested by the user. Preserve meaning and return only the translation."
+      }
+    },
+    {
+      "id": "generate_code",
+      "name": "Generate code",
+      "description": "Generates source code from a textual programming request.",
+      "tags": ["code", "generation"],
+      "executor": {
+        "type": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "llama3.2",
+        "systemPrompt": "Generate a correct, minimal solution for the programming request. Include code and only the explanation needed to use it."
+      }
+    }
+  ],
+  "payment": {
+    "networkDeployment": "../../var/payment-network.json",
+    "priceAtomic": "30000",
+    "recipient": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "facilitatorUrl": "http://127.0.0.1:8402"
+  },
+  "registration": {
+    "documentPath": "../../var/agents/ollama-generalist/registration.json",
+    "publicUrl": "http://127.0.0.1:8004/registration.json",
+    "ownerKeyEnv": "TRUSTROUTE_GENERALIST_OWNER_PRIVATE_KEY"
+  }
+}

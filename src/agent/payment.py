@@ -57,7 +57,7 @@ def build_payment_gate(
                 pay_to=policy.recipient,
                 max_timeout_seconds=60,
             ),
-            description="One paid A2A summarization invocation",
+            description="One paid A2A skill invocation",
             mime_type="application/json",
         )
     }

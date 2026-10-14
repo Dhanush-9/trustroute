@@ -42,6 +42,7 @@ async def resolve_and_invoke(
     identity_deployment_path: Path,
     client_policy_path: Path,
     agent_id: int,
+    skill_id: str,
     source: str,
 ) -> None:
     identity_deployment = LocalDeployment.from_path(identity_deployment_path)
@@ -103,12 +104,13 @@ async def resolve_and_invoke(
     await invoke(
         _base_url_from_agent_card(service.endpoint),
         source,
+        skill_id=skill_id,
         transport=transport,
     )
 
 
 def _read_multiline_input() -> str:
-    print("Paste text to summarize. Press Enter twice when done.\n")
+    print("Paste the task input. Press Enter twice when done.\n")
     lines: list[str] = []
     while True:
         line = input()
@@ -127,6 +129,11 @@ def main() -> None:
         help="local Identity Registry deployment record",
     )
     parser.add_argument("--agent-id", required=True, type=int)
+    parser.add_argument(
+        "--skill",
+        required=True,
+        help="exact AgentCard skill ID to invoke",
+    )
     parser.add_argument(
         "--policy",
         type=Path,
@@ -151,6 +158,7 @@ def main() -> None:
                 identity_deployment_path=args.deployment,
                 client_policy_path=args.policy,
                 agent_id=args.agent_id,
+                skill_id=args.skill,
                 source=source,
             )
         )

@@ -11,6 +11,7 @@ from a2a.helpers import get_message_text, new_text_message
 from a2a.types import SendMessageRequest
 
 from agent.cards import read_listing
+from agent.skill_routing import SKILL_HEADER, SKILL_METADATA_KEY
 
 
 def _agent_card_url(base_url: str) -> str:
@@ -21,15 +22,17 @@ async def invoke(
     base_url: str,
     source: str,
     *,
+    skill_id: str,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> None:
-    """Resolve the AgentCard, display it, and send one A2A message."""
+    """Resolve an AgentCard and invoke one explicitly selected skill."""
 
     # Local requests should not be redirected through a system HTTP proxy.
     async with httpx.AsyncClient(
         timeout=120,
         trust_env=False,
         transport=transport,
+        headers={SKILL_HEADER: skill_id},
     ) as http:
         resolver = A2ACardResolver(
             httpx_client=http,
@@ -42,6 +45,10 @@ async def invoke(
 
         interface = card.supported_interfaces[0]
         skill_ids = [skill.id for skill in card.skills]
+        if skill_id not in skill_ids:
+            raise A2AClientError(
+                f"agent does not advertise requested skill {skill_id!r}"
+            )
         listing = read_listing(card)
 
         print(f"AgentCard: {_agent_card_url(base_url)}")
@@ -50,6 +57,8 @@ async def invoke(
         print(f"Protocol: {interface.protocol_binding} {interface.protocol_version}")
         print(f"Interface: {interface.url}")
         print(f"Skills: {skill_ids}")
+        print(f"Requested skill: {skill_id}")
+        print("Skill advertised by AgentCard: verified")
 
         if listing is None:
             print("Advertised price: not provided")
@@ -64,7 +73,10 @@ async def invoke(
 
         client = await create_client(card, ClientConfig(httpx_client=http))
         try:
-            request = SendMessageRequest(message=new_text_message(source))
+            request = SendMessageRequest(
+                message=new_text_message(source),
+                metadata={SKILL_METADATA_KEY: skill_id},
+            )
             received_message = False
             start_time = time.perf_counter()
 
@@ -88,7 +100,7 @@ async def invoke(
 
 
 def _read_multiline_input() -> str:
-    print("Paste text to summarize. Press Enter twice when done.\n")
+    print("Paste the task input. Press Enter twice when done.\n")
     lines: list[str] = []
 
     while True:
@@ -110,8 +122,13 @@ def main() -> None:
         help="Known base URL of the A2A agent, for example http://localhost:8001",
     )
     parser.add_argument(
+        "--skill",
+        required=True,
+        help="exact AgentCard skill ID to invoke",
+    )
+    parser.add_argument(
         "--message",
-        help="Text to summarize; when omitted, multiline input is read interactively",
+        help="task input; when omitted, multiline input is read interactively",
     )
     args = parser.parse_args()
 
@@ -120,9 +137,9 @@ def main() -> None:
         parser.error("message must not be empty")
 
     try:
-        asyncio.run(invoke(args.url, source))
+        asyncio.run(invoke(args.url, source, skill_id=args.skill))
     except (A2AClientError, httpx.HTTPError) as error:
-        parser.exit(1, f"Could not reach A2A agent at {args.url}: {error}\n")
+        parser.exit(1, f"A2A invocation at {args.url} failed: {error}\n")
 
 
 if __name__ == "__main__":

@@ -34,9 +34,12 @@ async def _validate_agent_card(
         raise ValueError(
             f"AgentCard name {card.name!r} does not match config {config.name!r}"
         )
-    if config.skill.skill_id not in {skill.id for skill in card.skills}:
+    configured_skills = set(config.skill_ids)
+    advertised_skills = {skill.id for skill in card.skills}
+    if advertised_skills != configured_skills:
         raise ValueError(
-            f"AgentCard does not advertise configured skill {config.skill.skill_id!r}"
+            "AgentCard skills do not match configured skills: "
+            f"expected {sorted(configured_skills)}, got {sorted(advertised_skills)}"
         )
     if not any(
         interface.url.rstrip("/") == config.base_url
@@ -102,9 +105,10 @@ def main() -> None:
         if config.registration is None:
             raise ValueError("agent configuration does not enable registration")
 
-        private_key = os.environ.get("TRUSTROUTE_AGENT_OWNER_PRIVATE_KEY")
+        owner_key_env = config.registration.owner_key_env
+        private_key = os.environ.get(owner_key_env)
         if not private_key:
-            raise RuntimeError("TRUSTROUTE_AGENT_OWNER_PRIVATE_KEY is required")
+            raise RuntimeError(f"{owner_key_env} is required")
         owner = Account.from_key(private_key)
 
         identity_deployment = LocalDeployment.from_path(args.deployment)
@@ -159,6 +163,7 @@ def main() -> None:
                 raise RuntimeError("served registration document differs from output file")
 
         print(f"Agent: {config.name}")
+        print(f"Skills: {list(config.skill_ids)}")
         print(f"Identity: {identity}")
         print(f"Owner: {registered_owner}")
         print(f"Agent wallet: {agent_wallet}")

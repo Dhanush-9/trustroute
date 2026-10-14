@@ -9,6 +9,13 @@ from a2a.types import (
 )
 from google.protobuf.struct_pb2 import Struct
 
+from agent.config import SkillConfig
+from agent.skill_routing import (
+    SKILL_HEADER,
+    SKILL_METADATA_KEY,
+    SKILL_ROUTING_EXTENSION_URI,
+)
+
 # Identifier that tells clients how to interpret this custom extension.
 MARKETPLACE_EXTENSION_URI = "https://trustroute.example/extensions/marketplace/v1"
 
@@ -42,15 +49,28 @@ def marketplace_extension(
     )
 
 
+def skill_routing_extension() -> AgentExtension:
+    """Describe TrustRoute's explicit multi-skill dispatch convention."""
+
+    return AgentExtension(
+        uri=SKILL_ROUTING_EXTENSION_URI,
+        description="Binds an A2A request to one advertised skill",
+        required=False,
+        params=_dict_to_struct(
+            {
+                "http_header": SKILL_HEADER,
+                "request_metadata_key": SKILL_METADATA_KEY,
+            }
+        ),
+    )
+
+
 def build_agent_card(
     *,
     name: str,
     description: str,
     url: str,
-    skill_id: str,
-    skill_name: str,
-    skill_description: str,
-    tags: list[str],
+    skills: tuple[SkillConfig, ...],
     listing: AgentExtension | None,
     version: str = "0.1.0",
 ) -> AgentCard:
@@ -62,19 +82,24 @@ def build_agent_card(
     )
 
     # Describe optional protocol behavior, such as streaming and extensions.
+    extensions = [skill_routing_extension()]
+    if listing is not None:
+        extensions.append(listing)
     capabilities = AgentCapabilities(
         streaming=False,
         push_notifications=False,
-        extensions=[listing] if listing is not None else [],
+        extensions=extensions,
     )
 
-    # A skill advertises an ability; the executor contains its implementation.
-    skill = AgentSkill(
-        id=skill_id,
-        name=skill_name,
-        description=skill_description,
-        tags=tags,
-    )
+    advertised_skills = [
+        AgentSkill(
+            id=skill.skill_id,
+            name=skill.name,
+            description=skill.description,
+            tags=list(skill.tags),
+        )
+        for skill in skills
+    ]
 
     # The public card lets a client inspect the agent before invoking it.
     return AgentCard(
@@ -85,7 +110,7 @@ def build_agent_card(
         capabilities=capabilities,
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
-        skills=[skill],
+        skills=advertised_skills,
     )
 
 

@@ -16,12 +16,14 @@ from starlette.routing import Route
 from x402.http.middleware.fastapi import PaymentMiddlewareASGI
 
 from agent.payment import AgentPaymentGate
+from agent.skill_routing import SkillRoutingMiddleware
 
 
 def build_app(
     card: AgentCard,
     executor: AgentExecutor,
     *,
+    skill_ids: tuple[str, ...],
     registration_document_path: Path | None = None,
     payment_gate: AgentPaymentGate | None = None,
 ) -> Starlette:
@@ -78,5 +80,9 @@ def build_app(
             routes=payment_gate.paid_routes,
             server=payment_gate.resource_server,
         )
+
+    # Added after x402 so Starlette makes this the outer middleware. Invalid or
+    # ambiguous skills therefore fail before a 402 challenge can be created.
+    app.add_middleware(SkillRoutingMiddleware, skill_ids=skill_ids)
 
     return app

@@ -6,26 +6,45 @@ from pathlib import Path
 import uvicorn
 
 from agent.cards import build_agent_card, marketplace_extension
-from agent.config import AgentConfig
-from agent.executor import DeterministicSummarizer, OllamaSummarizer
+from agent.config import AgentConfig, SkillConfig
+from agent.executor import (
+    DeterministicSummarizer,
+    OllamaTextExecutor,
+    SkillDispatcher,
+)
 from agent.payment import build_payment_gate
 from agent.server import build_app
 from x402_support.network import PaymentNetwork
 
 
-def _build_executor(config: AgentConfig):
-    if config.executor.executor_type == "ollama":
-        return OllamaSummarizer(
-            agent_name=config.name,
-            model=config.executor.model or "",
-            host=config.executor.host or "",
-            system_prompt=config.executor.system_prompt or "",
+def _build_skill_executor(agent_name: str, skill: SkillConfig):
+    executor = skill.executor
+    if executor.executor_type == "ollama":
+        return OllamaTextExecutor(
+            agent_name=agent_name,
+            skill_id=skill.skill_id,
+            model=executor.model or "",
+            host=executor.host or "",
+            system_prompt=executor.system_prompt or "",
         )
 
     return DeterministicSummarizer(
-        agent_name=config.name,
-        latency_ms=config.executor.latency_ms or 0,
-        retention_ratio=config.executor.retention_ratio or 1,
+        agent_name=agent_name,
+        latency_ms=executor.latency_ms or 0,
+        retention_ratio=(
+            executor.retention_ratio
+            if executor.retention_ratio is not None
+            else 1
+        ),
+    )
+
+
+def _build_executor(config: AgentConfig) -> SkillDispatcher:
+    return SkillDispatcher(
+        {
+            skill.skill_id: _build_skill_executor(config.name, skill)
+            for skill in config.skills
+        }
     )
 
 
@@ -55,10 +74,7 @@ def run(config_path: Path) -> None:
         name=config.name,
         description=config.description,
         url=f"{config.base_url}/",
-        skill_id=config.skill.skill_id,
-        skill_name=config.skill.name,
-        skill_description=config.skill.description,
-        tags=list(config.skill.tags),
+        skills=config.skills,
         listing=listing,
         version=config.version,
     )
@@ -68,12 +84,17 @@ def run(config_path: Path) -> None:
     app = build_app(
         card,
         _build_executor(config),
+        skill_ids=config.skill_ids,
         registration_document_path=registration_path,
         payment_gate=payment_gate,
     )
 
     print(f"Agent: {config.name}")
     print(f"AgentCard: {config.agent_card_url}")
+    print(f"Skills: {list(config.skill_ids)}")
+    for skill in config.skills:
+        model = skill.executor.model or skill.executor.executor_type
+        print(f"  {skill.skill_id}: {model}")
     if config.payment is not None:
         print(
             f"Price: {displayed_price} {network.asset_symbol} "

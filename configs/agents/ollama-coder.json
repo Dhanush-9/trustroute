@@ -1,0 +1,59 @@
+{
+  "name": "ollama-coder",
+  "description": "Ollama-backed text agent configured with a code-generation emphasis",
+  "version": "0.2.0",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8006,
+    "baseUrl": "http://127.0.0.1:8006"
+  },
+  "skills": [
+    {
+      "id": "summarize_text",
+      "name": "Summarize text",
+      "description": "Condenses a passage into a shorter factual summary.",
+      "tags": ["summarization", "text"],
+      "executor": {
+        "type": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "llama3.2",
+        "systemPrompt": "Summarize the supplied text in a few direct sentences."
+      }
+    },
+    {
+      "id": "translate_text",
+      "name": "Translate text",
+      "description": "Translates text into the target language named by the user.",
+      "tags": ["translation", "text"],
+      "executor": {
+        "type": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "llama3.2",
+        "systemPrompt": "Translate the text into the language requested by the user. Return the translated text."
+      }
+    },
+    {
+      "id": "generate_code",
+      "name": "Generate code",
+      "description": "Generates source code from a textual programming request.",
+      "tags": ["code", "generation"],
+      "executor": {
+        "type": "ollama",
+        "host": "http://127.0.0.1:11434",
+        "model": "llama3.2",
+        "systemPrompt": "Act as a careful software engineer. Produce correct, runnable code for the requested language, handle edge cases, and include a concise explanation."
+      }
+    }
+  ],
+  "payment": {
+    "networkDeployment": "../../var/payment-network.json",
+    "priceAtomic": "40000",
+    "recipient": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
+    "facilitatorUrl": "http://127.0.0.1:8402"
+  },
+  "registration": {
+    "documentPath": "../../var/agents/ollama-coder/registration.json",
+    "publicUrl": "http://127.0.0.1:8006/registration.json",
+    "ownerKeyEnv": "TRUSTROUTE_CODER_OWNER_PRIVATE_KEY"
+  }
+}

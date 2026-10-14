@@ -1,23 +1,25 @@
 {
   "name": "summarizer-fast",
   "description": "Controlled fast summarization test fixture",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "server": {
     "host": "127.0.0.1",
     "port": 8001,
     "baseUrl": "http://127.0.0.1:8001"
   },
-  "skill": {
-    "id": "summarize_text",
-    "name": "Summarize text",
-    "description": "Condenses a passage into a shorter summary.",
-    "tags": ["summarization", "text", "test-fixture"]
-  },
-  "executor": {
-    "type": "deterministic",
-    "latencyMs": 100,
-    "retentionRatio": 0.3
-  },
+  "skills": [
+    {
+      "id": "summarize_text",
+      "name": "Summarize text",
+      "description": "Condenses a passage into a shorter summary.",
+      "tags": ["summarization", "text", "test-fixture"],
+      "executor": {
+        "type": "deterministic",
+        "latencyMs": 100,
+        "retentionRatio": 0.3
+      }
+    }
+  ],
   "testListing": {
     "amount": "0.01",
     "asset": "USDC"

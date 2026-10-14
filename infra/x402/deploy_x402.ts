@@ -15,24 +15,30 @@ const connection = await network.connect();
 const publicClient = await connection.viem.getPublicClient();
 const wallets = await connection.viem.getWalletClients();
 
-if (wallets.length < 3) {
-  throw new Error("The local node must expose at least three development accounts");
+if (wallets.length < 5) {
+  throw new Error("The local node must expose at least five development accounts");
 }
 
 // The payer signs authorizations, the recipient earns tokens, and the
 // facilitator submits the transfer transaction and pays its gas.
 // Use EIP-55 checksummed addresses because web3.py deliberately rejects
 // lower-case address arguments when constructing contract calls.
-const agentOwner = getAddress(wallets[0].account.address);
+const agentOwners = [
+  getAddress(wallets[0].account.address),
+  getAddress(wallets[3].account.address),
+  getAddress(wallets[4].account.address),
+];
 const payer = getAddress(wallets[1].account.address);
 const facilitator = getAddress(wallets[2].account.address);
 const chainId = await publicClient.getChainId();
 
 // Hardhat funds its development accounts with native gas currency. Check the
-// two roles that submit transactions so a changed node configuration fails
+// roles that submit transactions so a changed node configuration fails
 // during setup rather than during registration or settlement.
-if (await publicClient.getBalance({ address: agentOwner }) === 0n) {
-  throw new Error("The local agent owner has no native gas balance");
+for (const owner of agentOwners) {
+  if (await publicClient.getBalance({ address: owner }) === 0n) {
+    throw new Error(`Local agent owner ${owner} has no native gas balance`);
+  }
 }
 if (await publicClient.getBalance({ address: facilitator }) === 0n) {
   throw new Error("The local facilitator has no native gas balance");
@@ -62,7 +68,9 @@ await writeFile(
 );
 
 console.log("Local demo roles:");
-console.log(`  agent owner / recipient: ${agentOwner}`);
+console.log(`  generalist owner / recipient: ${agentOwners[0]}`);
+console.log(`  translator owner / recipient: ${agentOwners[1]}`);
+console.log(`  coder owner / recipient: ${agentOwners[2]}`);
 console.log(`  payer funded with trUSDC: ${payer}`);
 console.log(`  facilitator funded with gas: ${facilitator}`);
 console.log("Payment network:");
