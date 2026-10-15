@@ -13,7 +13,7 @@ from a2a.client import A2ACardResolver
 from a2a.client.errors import A2AClientError
 from eth_account import Account
 
-from agent.cards import read_listing
+from agent.cards import read_listing, read_skill_listing
 from agent.config import AgentConfig
 from erc8004.identity import IdentityRegistryClient, LocalDeployment
 from erc8004.registration import REGISTRATION_TYPE
@@ -49,14 +49,27 @@ async def _validate_agent_card(
 
     if config.payment is not None and network is not None:
         listing = read_listing(card)
-        expected_price = network.display_amount(config.payment.price_atomic)
         if listing is None:
             raise ValueError("paid AgentCard does not contain marketplace metadata")
-        if (
-            str(listing.get("advertised_price")) != expected_price
-            or listing.get("advertised_asset") != network.asset_symbol
-        ):
-            raise ValueError("AgentCard price does not match agent payment policy")
+        for skill in config.skills:
+            skill_listing = read_skill_listing(card, skill.skill_id)
+            if skill_listing is None:
+                raise ValueError(
+                    f"AgentCard has no price for skill {skill.skill_id!r}"
+                )
+            expected_atomic = skill.price_atomic or ""
+            expected_display = network.display_amount(expected_atomic)
+            if (
+                skill_listing.get("amount_atomic") != expected_atomic
+                or skill_listing.get("amount") != expected_display
+                or skill_listing.get("asset_symbol") != network.asset_symbol
+                or str(skill_listing.get("asset_address", "")).lower()
+                != network.asset.lower()
+                or skill_listing.get("network") != network.network
+            ):
+                raise ValueError(
+                    f"AgentCard price for {skill.skill_id!r} does not match config"
+                )
 
 
 def _registration_document(config: AgentConfig, identity) -> dict:
@@ -124,7 +137,7 @@ def main() -> None:
                 raise RuntimeError("ERC-8004 and x402 use different chains")
             if owner.address.lower() != config.payment.recipient.lower():
                 raise ValueError(
-                    "payment recipient must equal the registering owner in Checkpoint 2D"
+                    "payment recipient must equal the registering owner"
                 )
 
         asyncio.run(_validate_agent_card(config, payment_network))

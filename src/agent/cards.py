@@ -7,6 +7,7 @@ from a2a.types import (
     AgentInterface,
     AgentSkill,
 )
+from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Struct
 
 from agent.config import SkillConfig
@@ -28,11 +29,10 @@ def _dict_to_struct(data: dict) -> Struct:
 
 def marketplace_extension(
     *,
-    advertised_price: str,
-    advertised_asset: str,
+    skill_prices: dict[str, dict[str, str]],
     authority: str,
 ) -> AgentExtension:
-    """Return self-declared listing data, not an authoritative payment quote."""
+    """Advertise one non-authoritative price for every offered skill."""
 
     return AgentExtension(
         uri=MARKETPLACE_EXTENSION_URI,
@@ -40,8 +40,7 @@ def marketplace_extension(
         required=False,
         params=_dict_to_struct(
             {
-                "advertised_price": advertised_price,
-                "advertised_asset": advertised_asset,
+                "skill_prices": skill_prices,
                 "listing_authority": authority,
                 "authoritative_quote": "x402-payment-required",
             }
@@ -55,7 +54,7 @@ def skill_routing_extension() -> AgentExtension:
     return AgentExtension(
         uri=SKILL_ROUTING_EXTENSION_URI,
         description="Binds an A2A request to one advertised skill",
-        required=False,
+        required=True,
         params=_dict_to_struct(
             {
                 "http_header": SKILL_HEADER,
@@ -117,5 +116,18 @@ def build_agent_card(
 def read_listing(card: AgentCard) -> dict | None:
     for extension in card.capabilities.extensions or []:
         if extension.uri == MARKETPLACE_EXTENSION_URI:
-            return dict(extension.params)
+            return MessageToDict(extension.params)
     return None
+
+
+def read_skill_listing(card: AgentCard, skill_id: str) -> dict | None:
+    """Read the advertised listing for exactly one AgentCard skill."""
+
+    listing = read_listing(card)
+    if listing is None:
+        return None
+    skill_prices = listing.get("skill_prices")
+    if not isinstance(skill_prices, dict):
+        return None
+    skill_listing = skill_prices.get(skill_id)
+    return skill_listing if isinstance(skill_listing, dict) else None

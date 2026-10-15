@@ -1,12 +1,12 @@
-"""Resolve one known ERC-8004 identity, pay it, and invoke it through A2A."""
+"""Resolve one known ERC-8004 agent, pay it, and invoke it through A2A."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from a2a.client.errors import A2AClientError
@@ -15,27 +15,103 @@ from x402.http.clients.httpx import PaymentError
 
 from client.config import ClientPaymentPolicy
 from client.demo_client import invoke
-from client.payment import build_paying_transport
-from erc8004.identity import IdentityRegistryClient, LocalDeployment
-from erc8004.registration import RegistrationError, parse_registration_document
+from client.output import heading
+from client.payment import (
+    PaymentPolicyError,
+    build_paying_transport,
+    validate_advertised_price,
+)
+from erc8004.identity import LocalDeployment
+from erc8004.registration import RegistrationError
+from marketplace.catalog import CatalogEntry, CatalogError, resolve_agent
 from x402_support.network import PaymentNetwork
 
 
-AGENT_CARD_PATH = "/.well-known/agent-card.json"
+@dataclass(frozen=True, slots=True)
+class InvocationPlan:
+    entry: CatalogEntry
+    policy: ClientPaymentPolicy
+    network: PaymentNetwork
 
 
-class ResolutionError(RuntimeError):
-    """A known identity could not produce a safe, usable A2A endpoint."""
+def prepare_entry(
+    entry: CatalogEntry,
+    identity_deployment: LocalDeployment,
+    client_policy_path: Path,
+) -> InvocationPlan:
+    """Validate identity, listing, network, asset, and budget before task input."""
 
+    policy = ClientPaymentPolicy.from_path(client_policy_path)
+    network = PaymentNetwork.from_path(policy.network_deployment)
+    if network.chain_id != identity_deployment.chain_id:
+        raise CatalogError("ERC-8004 and client payment policy use different chains")
 
-def _base_url_from_agent_card(endpoint: str) -> str:
-    parsed = urlsplit(endpoint)
-    if parsed.query or parsed.fragment or not parsed.path.endswith(AGENT_CARD_PATH):
-        raise ResolutionError(
-            f"A2A endpoint must end with {AGENT_CARD_PATH} and have no query"
+    heading("SELECTED IDENTITY")
+    print(f"Registry: {entry.agent.identity.registry}")
+    print(f"Agent ID: {entry.agent.identity.agent_id}")
+    print(f"Agent: {entry.card.name}")
+    print(f"Owner: {entry.agent.owner}")
+    print(f"ERC-8004 agentWallet: {entry.agent.agent_wallet}")
+    print(f"agentURI: {entry.agent.agent_uri}")
+    print("Registration identity: verified")
+    print(f"Requested skill: {entry.skill_id}")
+
+    heading("PAYMENT POLICY")
+    print(
+        f"Advertised skill price: {entry.price.amount} "
+        f"{entry.price.asset_symbol} ({entry.price.amount_atomic} atomic units)"
+    )
+    print(
+        f"Client maximum: {network.display_amount(policy.max_amount_atomic)} "
+        f"{network.asset_symbol}"
+    )
+    try:
+        validate_advertised_price(
+            network,
+            policy,
+            amount_atomic=entry.price.amount_atomic,
+            advertised_network=entry.price.network,
+            advertised_asset=entry.price.asset_address,
         )
-    base_path = parsed.path.removesuffix(AGENT_CARD_PATH)
-    return urlunsplit((parsed.scheme, parsed.netloc, base_path, "", "")).rstrip("/")
+    except PaymentPolicyError:
+        print("Budget decision: rejected")
+        raise
+    print("Advertised network and asset: verified")
+    print("Budget decision: accepted")
+
+    return InvocationPlan(entry=entry, policy=policy, network=network)
+
+
+async def prepare_invocation(
+    identity_deployment_path: Path,
+    client_policy_path: Path,
+    agent_id: int,
+    skill_id: str,
+) -> InvocationPlan:
+    """Resolve and validate a known candidate without requesting task input."""
+
+    identity_deployment = LocalDeployment.from_path(identity_deployment_path)
+    entry = await resolve_agent(identity_deployment_path, agent_id, skill_id)
+    return prepare_entry(entry, identity_deployment, client_policy_path)
+
+
+async def invoke_plan(plan: InvocationPlan, source: str) -> None:
+    """Pay and invoke a previously validated candidate."""
+
+    entry = plan.entry
+    transport = build_paying_transport(
+        plan.network,
+        plan.policy,
+        expected_recipient=entry.agent.agent_wallet,
+        expected_amount_atomic=entry.price.amount_atomic,
+    )
+    await invoke(
+        entry.base_url,
+        source,
+        skill_id=entry.skill_id,
+        transport=transport,
+        expected_amount_atomic=entry.price.amount_atomic,
+    )
 
 
 async def resolve_and_invoke(
@@ -45,72 +121,19 @@ async def resolve_and_invoke(
     skill_id: str,
     source: str,
 ) -> None:
-    identity_deployment = LocalDeployment.from_path(identity_deployment_path)
-    registry = IdentityRegistryClient(identity_deployment)
+    """Compatibility entry point for scripted direct invocation."""
 
-    try:
-        agent = registry.read_agent(agent_id)
-    except Web3Exception as error:
-        raise ResolutionError(
-            f"agent ID {agent_id} does not exist in {registry.contract.address}"
-        ) from error
-
-    if not agent.agent_uri:
-        raise ResolutionError(f"agent ID {agent_id} has an empty agentURI")
-    if int(agent.agent_wallet, 16) == 0:
-        raise ResolutionError(f"agent ID {agent_id} has no verified agentWallet")
-
-    uri = urlsplit(agent.agent_uri)
-    if uri.scheme not in {"http", "https"} or not uri.netloc:
-        raise ResolutionError("this checkpoint supports HTTP(S) agentURI values")
-
-    async with httpx.AsyncClient(timeout=15, trust_env=False) as http:
-        response = await http.get(agent.agent_uri)
-        response.raise_for_status()
-        try:
-            registration_data = response.json()
-        except json.JSONDecodeError as error:
-            raise ResolutionError("agentURI did not return valid JSON") from error
-
-    registration = parse_registration_document(
-        registration_data,
-        expected_identity=agent.identity,
+    plan = await prepare_invocation(
+        identity_deployment_path,
+        client_policy_path,
+        agent_id,
+        skill_id,
     )
-    service = registration.a2a_service
-
-    print(f"Registry: {agent.identity.registry}")
-    print(f"Agent ID: {agent.identity.agent_id}")
-    print(f"Owner: {agent.owner}")
-    print(f"ERC-8004 agentWallet: {agent.agent_wallet}")
-    print(f"agentURI: {agent.agent_uri}")
-    print("Registration identity: verified")
-    print(f"Active agent: {registration.name}")
-    print(f"x402 support: {registration.x402_support}")
-    print(f"A2A service: {service.endpoint} (version {service.version})\n")
-
-    if not registration.x402_support:
-        raise ResolutionError("registration does not advertise x402 support")
-
-    policy = ClientPaymentPolicy.from_path(client_policy_path)
-    network = PaymentNetwork.from_path(policy.network_deployment)
-    if network.chain_id != identity_deployment.chain_id:
-        raise ResolutionError("ERC-8004 and client payment policy use different chains")
-
-    transport = build_paying_transport(
-        network,
-        policy,
-        expected_recipient=agent.agent_wallet,
-    )
-    await invoke(
-        _base_url_from_agent_card(service.endpoint),
-        source,
-        skill_id=skill_id,
-        transport=transport,
-    )
+    await invoke_plan(plan, source)
 
 
-def _read_multiline_input() -> str:
-    print("Paste the task input. Press Enter twice when done.\n")
+def read_multiline_input() -> str:
+    print("\nPaste the task input. Press Enter twice when done.\n")
     lines: list[str] = []
     while True:
         line = input()
@@ -118,6 +141,19 @@ def _read_multiline_input() -> str:
             break
         lines.append(line)
     return "\n".join(lines)
+
+
+async def _run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    plan = await prepare_invocation(
+        args.deployment,
+        args.policy,
+        args.agent_id,
+        args.skill,
+    )
+    source = args.message if args.message is not None else read_multiline_input()
+    if not source.strip():
+        parser.error("message must not be empty")
+    await invoke_plan(plan, source)
 
 
 def main() -> None:
@@ -142,34 +178,26 @@ def main() -> None:
     )
     parser.add_argument(
         "--message",
-        help="message to send; when omitted, multiline input is read interactively",
+        help="task input; when omitted, multiline input is read interactively",
     )
     args = parser.parse_args()
 
     if args.agent_id < 0:
         parser.error("agent ID must not be negative")
-    source = args.message if args.message is not None else _read_multiline_input()
-    if not source.strip():
-        parser.error("message must not be empty")
 
     try:
-        asyncio.run(
-            resolve_and_invoke(
-                identity_deployment_path=args.deployment,
-                client_policy_path=args.policy,
-                agent_id=args.agent_id,
-                skill_id=args.skill,
-                source=source,
-            )
-        )
+        asyncio.run(_run(args, parser))
+    except PaymentPolicyError as error:
+        parser.exit(1, f"Payment policy rejected the agent: {error}\n")
+    except PaymentError as error:
+        parser.exit(1, f"x402 payment failed: {error}\n")
     except (
         A2AClientError,
+        CatalogError,
         ConnectionError,
         FileNotFoundError,
         KeyError,
-        PaymentError,
         RegistrationError,
-        ResolutionError,
         RuntimeError,
         ValueError,
         Web3Exception,

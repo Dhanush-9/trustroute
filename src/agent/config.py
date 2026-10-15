@@ -55,12 +55,12 @@ class SkillConfig:
     description: str
     tags: tuple[str, ...]
     executor: ExecutorConfig
+    price_atomic: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class AgentPaymentConfig:
     network_deployment: Path
-    price_atomic: str
     recipient: str
     facilitator_url: str
 
@@ -129,6 +129,17 @@ def _parse_skills(data: dict) -> tuple[SkillConfig, ...]:
                 f"agent skills[{index}].tags must be a non-empty string list"
             )
 
+        price_atomic = skill_data.get("priceAtomic")
+        if price_atomic is not None:
+            if (
+                not isinstance(price_atomic, str)
+                or not price_atomic.isdigit()
+                or int(price_atomic) <= 0
+            ):
+                raise ValueError(
+                    f"agent skills[{index}].priceAtomic must be a positive integer string"
+                )
+
         skills.append(
             SkillConfig(
                 skill_id=_require_string(skill_data, "id"),
@@ -136,6 +147,7 @@ def _parse_skills(data: dict) -> tuple[SkillConfig, ...]:
                 description=_require_string(skill_data, "description"),
                 tags=tuple(raw_tags),
                 executor=_parse_executor(skill_data, index),
+                price_atomic=price_atomic,
             )
         )
 
@@ -169,6 +181,16 @@ class AgentConfig:
     def skill_ids(self) -> tuple[str, ...]:
         return tuple(skill.skill_id for skill in self.skills)
 
+    @property
+    def skill_prices(self) -> dict[str, str]:
+        """Return configured prices for paid skills."""
+
+        return {
+            skill.skill_id: skill.price_atomic
+            for skill in self.skills
+            if skill.price_atomic is not None
+        }
+
     @classmethod
     def from_path(cls, path: Path | str) -> "AgentConfig":
         source_path = Path(path).resolve()
@@ -184,15 +206,11 @@ class AgentConfig:
         if payment_data is not None:
             if not isinstance(payment_data, dict):
                 raise ValueError("agent payment configuration must be an object")
-            price_atomic = _require_string(payment_data, "priceAtomic")
-            if not price_atomic.isdigit() or int(price_atomic) <= 0:
-                raise ValueError("agent payment priceAtomic must be a positive integer")
             payment = AgentPaymentConfig(
                 network_deployment=_resolve_path(
                     source_path,
                     _require_string(payment_data, "networkDeployment"),
                 ),
-                price_atomic=price_atomic,
                 recipient=Web3.to_checksum_address(
                     _require_string(payment_data, "recipient")
                 ),
@@ -224,6 +242,13 @@ class AgentConfig:
                 "a paid agent must also declare registration, and vice versa"
             )
 
+        skills = _parse_skills(data)
+        priced_skills = [skill.skill_id for skill in skills if skill.price_atomic]
+        if payment is not None and len(priced_skills) != len(skills):
+            raise ValueError("every skill of a paid agent must define priceAtomic")
+        if payment is None and priced_skills:
+            raise ValueError("only paid agents may define skill priceAtomic")
+
         test_listing = None
         listing_data = data.get("testListing")
         if listing_data is not None:
@@ -247,7 +272,7 @@ class AgentConfig:
             base_url=_require_http_url(
                 _require_string(server, "baseUrl"), "server.baseUrl"
             ),
-            skills=_parse_skills(data),
+            skills=skills,
             payment=payment,
             registration=registration,
             test_listing=test_listing,

@@ -115,10 +115,14 @@ const identityRegistry =
 
 const chainId = await publicClient.getChainId();
 const registryVersion = await identityRegistry.read.getVersion();
+// No agents can be registered before deployment completes. Starting the event
+// scan here avoids searching unrelated historical blocks on a persistent RPC.
+const deploymentBlock = await publicClient.getBlockNumber();
 
 const deploymentInformation = {
   rpcUrl: "http://127.0.0.1:8545",
   chainId,
+  deploymentBlock: Number(deploymentBlock),
   identityRegistry: proxy.address,
   implementation: identityRegistryImpl.address,
   owner: deployerWallet.account.address,

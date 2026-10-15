@@ -54,17 +54,35 @@ def run(config_path: Path) -> None:
 
     if config.payment is not None:
         network = PaymentNetwork.from_path(config.payment.network_deployment)
-        displayed_price = network.display_amount(config.payment.price_atomic)
+        advertised_prices = {
+            skill.skill_id: {
+                "amount": network.display_amount(skill.price_atomic or "0"),
+                "amount_atomic": skill.price_atomic or "0",
+                "asset_symbol": network.asset_symbol,
+                "asset_address": network.asset,
+                "network": network.network,
+            }
+            for skill in config.skills
+        }
         listing = marketplace_extension(
-            advertised_price=displayed_price,
-            advertised_asset=network.asset_symbol,
+            skill_prices=advertised_prices,
             authority="agent-payment-config",
         )
-        payment_gate = build_payment_gate(network, config.payment)
+        payment_gate = build_payment_gate(
+            network,
+            config.payment,
+            config.skill_prices,
+        )
     elif config.test_listing is not None:
+        advertised_prices = {
+            skill.skill_id: {
+                "amount": config.test_listing.amount,
+                "asset_symbol": config.test_listing.asset,
+            }
+            for skill in config.skills
+        }
         listing = marketplace_extension(
-            advertised_price=config.test_listing.amount,
-            advertised_asset=config.test_listing.asset,
+            skill_prices=advertised_prices,
             authority=config.test_listing.authority,
         )
     else:
@@ -89,17 +107,22 @@ def run(config_path: Path) -> None:
         payment_gate=payment_gate,
     )
 
+    print("\n" + "=" * 68)
+    print("AGENT STARTUP")
+    print("=" * 68)
     print(f"Agent: {config.name}")
     print(f"AgentCard: {config.agent_card_url}")
     print(f"Skills: {list(config.skill_ids)}")
+    print("\nSKILLS AND PRICING")
     for skill in config.skills:
         model = skill.executor.model or skill.executor.executor_type
-        print(f"  {skill.skill_id}: {model}")
+        if config.payment is not None:
+            price = network.display_amount(skill.price_atomic or "0")
+            print(f"  {skill.skill_id}: {model}, {price} {network.asset_symbol}")
+        else:
+            print(f"  {skill.skill_id}: {model}")
     if config.payment is not None:
-        print(
-            f"Price: {displayed_price} {network.asset_symbol} "
-            f"({config.payment.price_atomic} atomic units)"
-        )
+        print("\nPAYMENT AND REGISTRATION")
         print(f"Payment recipient: {config.payment.recipient}")
         print(f"Facilitator: {config.payment.facilitator_url}")
         print(f"Registration file: {registration_path}")

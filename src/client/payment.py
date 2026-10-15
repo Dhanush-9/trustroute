@@ -13,6 +13,7 @@ from x402.mechanisms.evm import EthAccountSigner
 from x402.mechanisms.evm.exact import register_exact_evm_client
 
 from client.config import ClientPaymentPolicy
+from client.output import heading
 from x402_support.network import PaymentNetwork
 
 
@@ -25,6 +26,35 @@ BALANCE_OF_ABI = [
         "type": "function",
     }
 ]
+
+
+class PaymentPolicyError(ValueError):
+    """An advertised skill price is incompatible with the client policy."""
+
+
+def validate_advertised_price(
+    network: PaymentNetwork,
+    policy: ClientPaymentPolicy,
+    *,
+    amount_atomic: str,
+    advertised_network: str,
+    advertised_asset: str,
+) -> None:
+    """Reject unaffordable or wrong-network listings before task input."""
+
+    if advertised_network != network.network:
+        raise PaymentPolicyError(
+            f"agent advertises {advertised_network}, client requires {network.network}"
+        )
+    if advertised_asset.lower() != network.asset.lower():
+        raise PaymentPolicyError("advertised payment asset differs from client policy")
+    if int(amount_atomic) > int(policy.max_amount_atomic):
+        offered = network.display_amount(amount_atomic)
+        maximum = network.display_amount(policy.max_amount_atomic)
+        raise PaymentPolicyError(
+            f"advertised price {offered} {network.asset_symbol} exceeds "
+            f"client maximum {maximum} {network.asset_symbol}"
+        )
 
 
 def _token_balance(web3: Web3, asset: str, account: str) -> int:
@@ -40,8 +70,9 @@ def build_paying_transport(
     policy: ClientPaymentPolicy,
     *,
     expected_recipient: str,
+    expected_amount_atomic: str,
 ) -> httpx.AsyncBaseTransport:
-    """Build a transport that signs only identity-bound, in-budget offers."""
+    """Sign only identity-bound offers matching the advertised skill price."""
 
     private_key = os.environ.get("TRUSTROUTE_PAYER_PRIVATE_KEY")
     if not private_key:
@@ -58,13 +89,6 @@ def build_paying_transport(
     web3 = Web3(Web3.HTTPProvider(network.rpc_url))
     if not web3.is_connected() or web3.eth.chain_id != network.chain_id:
         raise ConnectionError("cannot connect to the expected payment network")
-
-    # Display the client's independent cap before the first request. This also
-    # makes the reason for an SDK-level spend-control rejection easy to see.
-    print(
-        f"Client maximum: {network.display_amount(policy.max_amount_atomic)} "
-        f"{network.asset_symbol}"
-    )
 
     client = x402Client()
     register_exact_evm_client(
@@ -86,9 +110,10 @@ def build_paying_transport(
 
     balances_before: dict[str, int] = {}
 
-    def enforce_identity_recipient(context):
+    def enforce_offer(context):
+        requirement = context.selected_requirements
         offered_recipient = Web3.to_checksum_address(
-            context.selected_requirements.pay_to
+            requirement.pay_to
         )
         if offered_recipient != expected_recipient:
             print("Budget decision: rejected")
@@ -96,7 +121,14 @@ def build_paying_transport(
             print(f"does not match ERC-8004 agentWallet {expected_recipient}\n")
             return AbortResult(reason="x402 recipient does not match ERC-8004 agentWallet")
 
+        if str(requirement.amount) != expected_amount_atomic:
+            print("Skill-price binding: rejected")
+            return AbortResult(
+                reason="x402 amount does not match the AgentCard skill price"
+            )
+
         print("Identity recipient: verified")
+        print("Skill-price binding: verified")
         print("Budget decision: accepted")
         return None
 
@@ -110,7 +142,8 @@ def build_paying_transport(
             web3, network.asset, expected_recipient
         )
 
-        print("x402 challenge: HTTP 402 Payment Required")
+        heading("X402 PAYMENT")
+        print("Challenge: HTTP 402 Payment Required")
         print(f"x402 version: {context.payment_payload.x402_version}")
         print(f"Payment scheme: {requirement.scheme}")
         print(f"Payment network: {requirement.network}")
@@ -143,7 +176,7 @@ def build_paying_transport(
         print()
         return None
 
-    client.on_before_payment_creation(enforce_identity_recipient)
+    client.on_before_payment_creation(enforce_offer)
     client.on_after_payment_creation(show_authorization)
     client.on_payment_response(show_settlement)
 

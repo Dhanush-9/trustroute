@@ -13,6 +13,7 @@
       "name": "Summarize text",
       "description": "Condenses a passage into a shorter factual summary.",
       "tags": ["summarization", "text"],
+      "priceAtomic": "20000",
       "executor": {
         "type": "ollama",
         "host": "http://127.0.0.1:11434",
@@ -25,6 +26,7 @@
       "name": "Translate text",
       "description": "Translates text into the target language named by the user.",
       "tags": ["translation", "text"],
+      "priceAtomic": "45000",
       "executor": {
         "type": "ollama",
         "host": "http://127.0.0.1:11434",
@@ -37,6 +39,7 @@
       "name": "Generate code",
       "description": "Generates source code from a textual programming request.",
       "tags": ["code", "generation"],
+      "priceAtomic": "25000",
       "executor": {
         "type": "ollama",
         "host": "http://127.0.0.1:11434",
@@ -47,7 +50,6 @@
   ],
   "payment": {
     "networkDeployment": "../../var/payment-network.json",
-    "priceAtomic": "25000",
     "recipient": "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
     "facilitatorUrl": "http://127.0.0.1:8402"
   },

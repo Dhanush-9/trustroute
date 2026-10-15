@@ -10,8 +10,13 @@ from a2a.client.errors import A2AClientError
 from a2a.helpers import get_message_text, new_text_message
 from a2a.types import SendMessageRequest
 
-from agent.cards import read_listing
-from agent.skill_routing import SKILL_HEADER, SKILL_METADATA_KEY
+from agent.cards import read_listing, read_skill_listing
+from agent.skill_routing import (
+    SKILL_HEADER,
+    SKILL_METADATA_KEY,
+    SKILL_ROUTING_EXTENSION_URI,
+)
+from client.output import heading
 
 
 def _agent_card_url(base_url: str) -> str:
@@ -24,6 +29,7 @@ async def invoke(
     *,
     skill_id: str,
     transport: httpx.AsyncBaseTransport | None = None,
+    expected_amount_atomic: str | None = None,
 ) -> None:
     """Resolve an AgentCard and invoke one explicitly selected skill."""
 
@@ -50,7 +56,20 @@ async def invoke(
                 f"agent does not advertise requested skill {skill_id!r}"
             )
         listing = read_listing(card)
+        skill_listing = read_skill_listing(card, skill_id)
 
+        if expected_amount_atomic is not None:
+            current_amount = (
+                skill_listing.get("amount_atomic")
+                if skill_listing is not None
+                else None
+            )
+            if current_amount != expected_amount_atomic:
+                raise A2AClientError(
+                    "AgentCard skill price changed after candidate selection"
+                )
+
+        heading("A2A AGENTCARD")
         print(f"AgentCard: {_agent_card_url(base_url)}")
         print(f"Agent: {card.name}")
         print(f"Version: {card.version}")
@@ -60,21 +79,23 @@ async def invoke(
         print(f"Requested skill: {skill_id}")
         print("Skill advertised by AgentCard: verified")
 
-        if listing is None:
+        if listing is None or skill_listing is None:
             print("Advertised price: not provided")
         else:
             print(
-                "Advertised price: "
-                f"{listing.get('advertised_price')} "
-                f"{listing.get('advertised_asset')}"
+                "Advertised skill price: "
+                f"{skill_listing.get('amount')} "
+                f"{skill_listing.get('asset_symbol')}"
             )
             print(f"Listing authority: {listing.get('listing_authority')}")
             print(f"Price authority: {listing.get('authoritative_quote')}")
 
         client = await create_client(card, ClientConfig(httpx_client=http))
         try:
+            message = new_text_message(source)
+            message.extensions.append(SKILL_ROUTING_EXTENSION_URI)
             request = SendMessageRequest(
-                message=new_text_message(source),
+                message=message,
                 metadata={SKILL_METADATA_KEY: skill_id},
             )
             received_message = False
@@ -86,6 +107,7 @@ async def invoke(
                     round_trip_ms = round(
                         (time.perf_counter() - start_time) * 1000
                     )
+                    heading("A2A RESULT")
                     print(f"Context ID: {chunk.message.context_id}")
                     print(f"Task ID: {chunk.message.task_id}")
                     print(f"Client-observed invocation: {round_trip_ms} ms")

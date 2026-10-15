@@ -7,21 +7,22 @@ A2A.
 
 ## Status
 
-Working: three independently owned Ollama agents, each offering three skills,
-registered on a local chain and invoked with a client-chosen agent and skill,
-paid in a local test token.
+Working: three independently owned Ollama agents are discovered from ERC-8004
+events, filtered by A2A skill, manually selected, paid at a skill-specific x402
+price, and invoked over A2A.
 
-Not yet implemented: registry indexing, agent selection, per-skill pricing,
-reputation feedback and attack experiments.
+Not yet implemented: automatic ranking, reputation feedback and attack
+experiments.
 
 ## How it works
 
 ```text
-agentId + skill
-  -> ERC-8004 owner, agentWallet and agentURI
-  -> registration document -> AgentCard
+skill
+  -> scan ERC-8004 Registered events
+  -> registration documents -> AgentCards
+  -> show eligible agents and per-skill prices -> user chooses agentId
   -> unpaid A2A request -> HTTP 402 (x402)
-  -> client checks network, token, budget and recipient, then signs
+  -> client checks advertised price, network, token, budget and recipient
   -> facilitator verifies; agent runs the skill; facilitator settles
   -> client receives the A2A reply and the settlement transaction
 ```
@@ -99,11 +100,11 @@ PYTHONPATH=src python -m agent.run_agent \
   --config configs/agents/ollama-coder.json
 ```
 
-| Agent               | Port | Owner     | Price (all skills) |
-| ------------------- | ---- | --------- | ------------------ |
-| `ollama-generalist` | 8004 | account 0 | 0.03 trUSDC        |
-| `ollama-translator` | 8005 | account 3 | 0.025 trUSDC       |
-| `ollama-coder`      | 8006 | account 4 | 0.04 trUSDC        |
+| Agent               | Port | Owner     | Summarize | Translate | Code  |
+| ------------------- | ---- | --------- | --------- | --------- | ----- |
+| `ollama-generalist` | 8004 | account 0 | 0.028     | 0.030     | 0.032 |
+| `ollama-translator` | 8005 | account 3 | 0.020     | 0.045     | 0.025 |
+| `ollama-coder`      | 8006 | account 4 | 0.020     | 0.025     | 0.050 |
 
 Each agent offers `summarize_text`, `translate_text` and `generate_code`, with
 its own model and prompt per skill (all `llama3.2` for now).
@@ -126,35 +127,43 @@ PYTHONPATH=src python scripts/register_agent.py \
 Each command registers with the owner key named in that agent's config and
 prints the assigned `agentId`. Note the IDs; they depend on registration order.
 
-**5. Invoke**
+**5. Discover, choose and invoke**
 
 ```bash
 source .env.local
 
-PYTHONPATH=src python -m client.resolve_and_invoke \
-  --agent-id <ID> \
+PYTHONPATH=src python -m client.discover_and_invoke \
   --skill translate_text \
   --policy configs/client/local-client.json
 ```
 
-The client prompts for the text to send. Change `--agent-id` and `--skill` to
-use another agent or skill. The output shows the resolved identity, the
-advertised and authoritative price, recipient and budget checks, the settlement
-transaction, balance changes, A2A context and task IDs, and the response.
+The client scans registry events, validates registration documents and
+AgentCards, shows all eligible agents and their prices, then prompts for an
+`agentId`. It asks for task input only after the selection and payment policy
+have been validated.
+
+For repeatable scripts, choose a known ID directly:
+
+```bash
+PYTHONPATH=src python -m client.resolve_and_invoke \
+  --agent-id <ID> --skill translate_text \
+  --policy configs/client/local-client.json \
+  --message "Translate into Hindi: Trust requires evidence."
+```
 
 **Rejections** (no authorization is signed, no balance changes):
 
 ```bash
 source .env.local
 
-# skill the agent does not advertise
-PYTHONPATH=src python -m client.resolve_and_invoke \
-  --agent-id <ID> --skill unknown_skill \
+# no registered AgentCard advertises this skill
+PYTHONPATH=src python -m client.discover_and_invoke \
+  --skill unknown_skill \
   --policy configs/client/local-client.json
 
-# price above the client's maximum (0.02 trUSDC)
-PYTHONPATH=src python -m client.resolve_and_invoke \
-  --agent-id <ID> --skill summarize_text \
+# every translation candidate exceeds this client's 0.02 trUSDC maximum
+PYTHONPATH=src python -m client.discover_and_invoke \
+  --skill translate_text \
   --policy configs/client/low-budget.json
 ```
 
@@ -176,7 +185,7 @@ PYTHONPATH=src python -m client.demo_client \
 
 | Location                   | Contents                                              |
 | -------------------------- | ----------------------------------------------------- |
-| `configs/agents/`          | server, skills and executors, price, recipient, owner key variable |
+| `configs/agents/`          | server, skills, per-skill prices, executors, recipient and owner key variable |
 | `configs/client/`          | payer address, maximum payment                        |
 | `configs/facilitator/`     | service URL, signer address, network                  |
 | `var/*.json`               | generated deployment data (ignored by Git)            |
@@ -189,5 +198,6 @@ PYTHONPATH=src python -m client.demo_client \
 - `src/client/`: resolution, budget policy, payer signing, invocation
 - `src/facilitator/`: x402 verification and settlement service
 - `src/erc8004/`: Identity Registry client and registration documents
+- `src/marketplace/`: event-based catalog and AgentCard validation
 - `src/x402_support/`: shared network and token data
 - `infra/`, `scripts/`: contracts, deployment, setup and registration

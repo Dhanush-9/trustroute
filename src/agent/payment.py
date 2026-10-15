@@ -12,6 +12,7 @@ from x402.mechanisms.evm.exact import register_exact_evm_server
 from x402.schemas import AssetAmount
 
 from agent.config import AgentPaymentConfig
+from agent.skill_routing import SKILL_HEADER
 from x402_support.network import PaymentNetwork
 
 
@@ -30,8 +31,9 @@ class AgentPaymentGate:
 def build_payment_gate(
     network: PaymentNetwork,
     policy: AgentPaymentConfig,
+    skill_prices: dict[str, str],
 ) -> AgentPaymentGate:
-    """Protect the A2A JSON-RPC route using this agent's own price policy."""
+    """Protect A2A calls with the price of the explicitly selected skill."""
 
     facilitator_client = HTTPFacilitatorClient(
         HTTPFacilitatorConfig(url=policy.facilitator_url)
@@ -39,21 +41,29 @@ def build_payment_gate(
     resource_server = x402ResourceServer(facilitator_client)
     register_exact_evm_server(resource_server, networks=network.network)
 
-    payment_asset = AssetAmount(
-        amount=policy.price_atomic,
-        asset=network.asset,
-        extra={
-            "name": network.asset_name,
-            "version": network.asset_version,
-            "assetTransferMethod": "eip3009",
-        },
-    )
+    def price_for_skill(context) -> AssetAmount:
+        # SkillRoutingMiddleware has already required this header to match the
+        # A2A request metadata before x402 evaluates this callback.
+        skill_id = context.adapter.get_header(SKILL_HEADER)
+        price_atomic = skill_prices.get(skill_id or "")
+        if price_atomic is None:
+            raise ValueError(f"no payment price is configured for skill {skill_id!r}")
+        return AssetAmount(
+            amount=price_atomic,
+            asset=network.asset,
+            extra={
+                "name": network.asset_name,
+                "version": network.asset_version,
+                "assetTransferMethod": "eip3009",
+            },
+        )
+
     paid_routes = {
         "POST /": RouteConfig(
             accepts=PaymentOption(
                 scheme="exact",
                 network=network.network,
-                price=payment_asset,
+                price=price_for_skill,
                 pay_to=policy.recipient,
                 max_timeout_seconds=60,
             ),

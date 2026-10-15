@@ -87,7 +87,6 @@ class AgentIdentity:
 
 @dataclass(frozen=True, slots=True)
 class RegisteredAgent:
-
     identity: AgentIdentity
     owner: str
     agent_wallet: str
@@ -96,9 +95,9 @@ class RegisteredAgent:
 
 @dataclass(frozen=True, slots=True)
 class LocalDeployment:
-
     rpc_url: str
     chain_id: int
+    deployment_block: int
     identity_registry: str
     implementation: str
     owner: str
@@ -111,6 +110,8 @@ class LocalDeployment:
         return cls(
             rpc_url=str(data["rpcUrl"]),
             chain_id=int(data["chainId"]),
+            # Older local deployment files predate event-based discovery.
+            deployment_block=int(data.get("deploymentBlock", 0)),
             identity_registry=str(data["identityRegistry"]),
             implementation=str(data["implementation"]),
             owner=str(data["owner"]),
@@ -146,7 +147,8 @@ class IdentityRegistryClient:
 
         if actual_chain_id != deployment.chain_id:
             raise RuntimeError(
-                f"deployment says chain {deployment.chain_id} but the RPC reports {actual_chain_id}"
+                f"deployment says chain {deployment.chain_id} "
+                f"but the RPC reports {actual_chain_id}"
             )
 
         # The proxy address is the address clients interact with.
@@ -165,13 +167,11 @@ class IdentityRegistryClient:
             abi=IDENTITY_REGISTRY_ABI,
         )
 
-
     @property
     def signer_address(self) -> str:
         if self._account is None:
             raise RuntimeError("a private key is required for registry writes")
         return self._account.address
-
 
     def _send_transaction(self, contract_function) -> tuple[str, object]:
         """Sign locally instead of relying on an unlocked RPC account."""
@@ -193,7 +193,6 @@ class IdentityRegistryClient:
         tx_hash = self.web3.eth.send_raw_transaction(signed.raw_transaction)
         receipt = self.web3.eth.wait_for_transaction_receipt(tx_hash)
         return self.web3.to_hex(tx_hash), receipt
-
 
     def register(self) -> tuple[AgentIdentity, str]:
         """Register a new agent and return its identity and transaction hash."""
@@ -221,7 +220,6 @@ class IdentityRegistryClient:
         )
 
         return identity, tx_hash
-
 
     def set_agent_uri(self, agent_id: int, uri: str) -> str:
         """Store the off-chain registration-document URI for an agent."""
@@ -257,4 +255,17 @@ class IdentityRegistryClient:
             owner=self.owner_of(agent_id),
             agent_wallet=self.agent_wallet(agent_id),
             agent_uri=self.token_uri(agent_id),
+        )
+
+    def registered_agent_ids(self) -> tuple[int, ...]:
+        """Enumerate identities from official ERC-8004 Registered events."""
+
+        events = self.contract.events.Registered().get_logs(
+            from_block=self.deployment.deployment_block,
+            to_block="latest",
+        )
+        # Preserve registration order while remaining safe against duplicate
+        # log delivery from unusual RPC providers.
+        return tuple(
+            dict.fromkeys(int(event["args"]["agentId"]) for event in events)
         )
