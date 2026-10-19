@@ -1,37 +1,49 @@
 # TrustRoute
 
-TrustRoute is a prototype for identity-rooted discovery, payment and invocation
-of A2A agents. Agents register in an ERC-8004 Identity Registry, advertise
-skills through A2A AgentCards, accept x402 payments, and return results over
-A2A.
+TrustRoute is a prototype marketplace for AI agents. A client describes a task
+in ordinary language; TrustRoute finds independently owned A2A agents registered
+through ERC-8004, lets the client choose one, pays it through x402, invokes it
+through A2A, and can publish interaction-bound feedback.
 
-## Status
+## Current capabilities
 
-Working: three independently owned Ollama agents are discovered from ERC-8004
-events, filtered by A2A skill, manually selected, paid at a skill-specific x402
-price, and invoked over A2A.
+- Three independently owned Ollama agents, each with its own ERC-8004 identity,
+  wallet, A2A AgentCard, prompts, models, and per-skill prices.
+- Natural-language task understanding for summarization, translation, and code
+  generation. Agents may use different local skill IDs for the same task.
+- Semantic comparison of the understood task with public AgentCard skill names,
+  descriptions, tags, and examples.
+- Manual choice among matching agents. Automatic reputation-based ranking is
+  intentionally not implemented yet.
+- Client-side price, network, token, recipient, and budget checks.
+- End-to-end x402 authorization, facilitator verification and settlement, and
+  A2A invocation.
+- Optional ERC-8004 feedback with content-addressed interaction evidence.
 
-Not yet implemented: automatic ranking, reputation feedback and attack
-experiments.
+Reputation aggregation, automatic selection, and the Sybil/circular-payment/
+cold-start experiments are the next research layer.
 
-## How it works
+## Request flow
 
 ```text
-skill
-  -> scan ERC-8004 Registered events
-  -> registration documents -> AgentCards
-  -> show eligible agents and per-skill prices -> user chooses agentId
-  -> unpaid A2A request -> HTTP 402 (x402)
-  -> client checks advertised price, network, token, budget and recipient
-  -> facilitator verifies; agent runs the skill; facilitator settles
-  -> client receives the A2A reply and the settlement transaction
+natural-language request
+  -> infer a task type such as translation
+  -> scan ERC-8004 identities
+  -> read registration documents and A2A AgentCards
+  -> semantically compare advertised skills with the task type
+  -> show matching agents, local skill IDs, prices, and budget status
+  -> client chooses an agent
+  -> unpaid A2A request receives an HTTP 402 challenge
+  -> client validates and signs the payment authorization
+  -> facilitator verifies; agent executes; facilitator settles
+  -> client receives the A2A result and payment receipt
+  -> optional evidence document and ERC-8004 feedback transaction
 ```
 
-- The skill is sent in the `X-TrustRoute-Skill` header and in A2A request
-  metadata. The agent rejects a missing, unknown or mismatched skill before it
-  issues a payment challenge.
-- The client refuses any offer whose `payTo` differs from the agent's ERC-8004
-  `agentWallet`, and its budget is independent of the agent's price.
+The task type is TrustRoute's simple shared label for research and feedback,
+such as `translation`. The A2A skill ID belongs to the agent and does not have
+to use that exact wording: one agent may advertise `translate_text` while
+another advertises `language_conversion`.
 
 ## Setup
 
@@ -43,11 +55,11 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 scripts/setup_erc8004.sh
 ollama pull llama3.2
+ollama pull embeddinggemma
 cp .env.example .env.local
 ```
 
-Start the Hardhat node (step 1 below) and copy its printed development keys
-into `.env.local`:
+Start the Hardhat node and copy its printed development keys into `.env.local`:
 
 | Variable                                  | Hardhat account |
 | ----------------------------------------- | --------------- |
@@ -58,36 +70,37 @@ into `.env.local`:
 | `TRUSTROUTE_CODER_OWNER_PRIVATE_KEY`      | 4               |
 
 These are public development keys. Never use them on a public network. Agent
-processes need no keys, so do not `source .env.local` for them.
+processes need no keys, so do not source `.env.local` in agent terminals.
 
-## Run
+## Run the complete demo
 
-Use one terminal per long-running process, each in the repository root with
-the virtual environment active.
+Use one terminal per long-running process. Run commands from the repository
+root with the virtual environment active.
 
-**1. Chain and contracts**
+### 1. Start the chain and deploy contracts
 
 ```bash
 scripts/start_erc8004_node.sh
 ```
 
-In another terminal:
+In a second terminal:
 
 ```bash
 scripts/deploy_erc8004_identity.sh
 scripts/deploy_x402_local.sh
 ```
 
-**2. Facilitator**
+### 2. Start the facilitator
 
 ```bash
 source .env.local
-
 PYTHONPATH=src python -m facilitator.run_facilitator \
   --config configs/facilitator/local.json
 ```
 
-**3. Agents** (one terminal each)
+### 3. Start the three agents
+
+Run each command in a separate terminal:
 
 ```bash
 PYTHONPATH=src python -m agent.run_agent \
@@ -106,72 +119,98 @@ PYTHONPATH=src python -m agent.run_agent \
 | `ollama-translator` | 8005 | account 3 | 0.020     | 0.045     | 0.025 |
 | `ollama-coder`      | 8006 | account 4 | 0.020     | 0.025     | 0.050 |
 
-Each agent offers `summarize_text`, `translate_text` and `generate_code`, with
-its own model and prompt per skill (all `llama3.2` for now).
+Prices are in trUSDC. Every skill's Ollama model is configurable independently;
+all currently use `llama3.2` so the project runs with one downloaded text model.
 
-**4. Register** (agents must be running)
+### 4. Register the agents
+
+The agents must be running because their registration documents are served by
+their HTTP servers.
 
 ```bash
 source .env.local
 
 PYTHONPATH=src python scripts/register_agent.py \
   --config configs/agents/ollama-generalist.json
-
 PYTHONPATH=src python scripts/register_agent.py \
   --config configs/agents/ollama-translator.json
-
 PYTHONPATH=src python scripts/register_agent.py \
   --config configs/agents/ollama-coder.json
 ```
 
-Each command registers with the owner key named in that agent's config and
-prints the assigned `agentId`. Note the IDs; they depend on registration order.
+Each command registers with the owner key named in its agent configuration.
+The assigned `agentId` depends on registration order.
 
-**5. Discover, choose and invoke**
+### 5. Discover, choose, pay, and invoke
 
 ```bash
 source .env.local
 
 PYTHONPATH=src python -m client.discover_and_invoke \
-  --skill translate_text \
   --policy configs/client/local-client.json
 ```
 
-The client scans registry events, validates registration documents and
-AgentCards, shows all eligible agents and their prices, then prompts for an
-`agentId`. It asks for task input only after the selection and payment policy
-have been validated.
+Enter a complete request such as:
 
-For repeatable scripts, choose a known ID directly:
+```text
+Translate the following sentence into Hindi: Trust requires evidence.
+```
+
+The client first understands the task, then discovers and compares agents. It
+prints the match score, local skill ID, price, and budget result before asking
+you to choose an eligible `agentId`.
+
+For a repeatable, non-interactive run:
 
 ```bash
-PYTHONPATH=src python -m client.resolve_and_invoke \
-  --agent-id <ID> --skill translate_text \
+PYTHONPATH=src python -m client.discover_and_invoke \
+  --message "Translate into Hindi: Trust requires evidence." \
+  --agent-id 1 \
+  --policy configs/client/local-client.json
+```
+
+`--agent-id` only skips the prompt; the chosen agent must still match the
+understood task. `--task-type translation` is available as an experimental
+ground-truth override. Normal users do not need it.
+
+### 6. Optionally publish feedback
+
+```bash
+PYTHONPATH=src python -m client.discover_and_invoke \
   --policy configs/client/local-client.json \
-  --message "Translate into Hindi: Trust requires evidence."
+  --review
 ```
 
-**Rejections** (no authorization is signed, no balance changes):
+After a successful response, enter a whole-number quality score from 0 to 100.
+The client writes `var/evidence/<hash>.json` and submits `giveFeedback` from the
+same wallet that paid. Without `--review`, no feedback transaction is created.
+`--feedback-score 85` supplies the score non-interactively.
+
+Evidence stores hashes of the request and response, not their raw text. It
+shows that a paid interaction and its recorded bytes are linked; it cannot
+prove that the reviewer's quality judgment is honest.
+
+## Deliberate rejection examples
+
+These fail before a payment authorization is signed:
 
 ```bash
-source .env.local
-
-# no registered AgentCard advertises this skill
+# The selected agent must be one of the semantically matching candidates.
 PYTHONPATH=src python -m client.discover_and_invoke \
-  --skill unknown_skill \
+  --message "Translate this into Hindi: hello" \
+  --agent-id 999 \
   --policy configs/client/local-client.json
 
-# every translation candidate exceeds this client's 0.02 trUSDC maximum
+# Matching offers above this policy's cap are displayed as over budget.
 PYTHONPATH=src python -m client.discover_and_invoke \
-  --skill translate_text \
+  --message "Translate this paragraph into Hindi: hello" \
   --policy configs/client/low-budget.json
 ```
 
-## Test fixtures
+## Direct A2A test fixture
 
-`fast-test`, `accurate-test` and `new-test` are deterministic, unregistered
-agents for repeatable tests. They advertise only `summarize_text` and need no
-chain:
+`fast-test`, `accurate-test`, and `new-test` are deterministic, unregistered
+agents for protocol checks without a chain or Ollama:
 
 ```bash
 PYTHONPATH=src python -m agent.run_agent \
@@ -181,23 +220,31 @@ PYTHONPATH=src python -m client.demo_client \
   --url http://127.0.0.1:8001 --skill summarize_text
 ```
 
+This low-level test intentionally accepts an exact local skill ID. It is not
+the marketplace discovery command.
+
 ## Configuration
 
-| Location                   | Contents                                              |
-| -------------------------- | ----------------------------------------------------- |
-| `configs/agents/`          | server, skills, per-skill prices, executors, recipient and owner key variable |
-| `configs/client/`          | payer address, maximum payment                        |
-| `configs/facilitator/`     | service URL, signer address, network                  |
-| `var/*.json`               | generated deployment data (ignored by Git)            |
-| `.env.local`               | private keys (ignored by Git)                         |
+| Location                   | Contents |
+| -------------------------- | -------- |
+| `configs/agents/`          | Agent servers, public skills, models, prompts, prices, recipients, and owner-key variable names |
+| `configs/client/`          | Payer address and maximum payment |
+| `configs/discovery/`       | Task types, thresholds, and local Ollama routing/embedding models |
+| `configs/facilitator/`     | Facilitator URL, signer address, and network |
+| `var/*.json`               | Generated deployment data, ignored by Git |
+| `var/evidence/`            | Local content-addressed interaction evidence |
+| `.env.local`               | Development private keys, ignored by Git |
 
-## Layout
+## Project layout
 
-- `src/agent/`: config, AgentCard, skill routing and dispatch, executors,
-  seller payment policy, server
-- `src/client/`: resolution, budget policy, payer signing, invocation
+- `src/agent/`: configuration, AgentCards, skill dispatch, executors, seller
+  payment policy, and HTTP server
+- `src/client/`: task understanding, semantic matching, payment policy,
+  invocation, and feedback
+- `src/marketplace/`: ERC-8004 event scan, registration resolution, and
+  AgentCard validation
 - `src/facilitator/`: x402 verification and settlement service
-- `src/erc8004/`: Identity Registry client and registration documents
-- `src/marketplace/`: event-based catalog and AgentCard validation
+- `src/erc8004/`: Identity and Reputation Registry adapters
 - `src/x402_support/`: shared network and token data
-- `infra/`, `scripts/`: contracts, deployment, setup and registration
+- `infra/`, `scripts/`: contracts, setup, deployment, and registration
+- `teach/`: beginner-friendly execution flow and design decisions

@@ -13,6 +13,7 @@
       "name": "Summarize text",
       "description": "Condenses a passage into a shorter factual summary.",
       "tags": ["summarization", "text"],
+      "examples": ["Summarize this article.", "Give me the main points from this passage."],
       "priceAtomic": "28000",
       "executor": {
         "type": "ollama",
@@ -26,6 +27,7 @@
       "name": "Translate text",
       "description": "Translates text into the target language named by the user.",
       "tags": ["translation", "text"],
+      "examples": ["Translate this paragraph into Hindi.", "Convert this sentence to French."],
       "priceAtomic": "30000",
       "executor": {
         "type": "ollama",
@@ -39,6 +41,7 @@
       "name": "Generate code",
       "description": "Generates source code from a textual programming request.",
       "tags": ["code", "generation"],
+      "examples": ["Write a Python function for this task.", "Generate Java code for binary search."],
       "priceAtomic": "32000",
       "executor": {
         "type": "ollama",

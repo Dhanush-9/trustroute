@@ -54,6 +54,7 @@ class SkillConfig:
     name: str
     description: str
     tags: tuple[str, ...]
+    examples: tuple[str, ...]
     executor: ExecutorConfig
     price_atomic: str | None
 
@@ -129,6 +130,15 @@ def _parse_skills(data: dict) -> tuple[SkillConfig, ...]:
                 f"agent skills[{index}].tags must be a non-empty string list"
             )
 
+        raw_examples = skill_data.get("examples", [])
+        if not isinstance(raw_examples, list) or not all(
+            isinstance(example, str) and example.strip()
+            for example in raw_examples
+        ):
+            raise ValueError(
+                f"agent skills[{index}].examples must be a string list"
+            )
+
         price_atomic = skill_data.get("priceAtomic")
         if price_atomic is not None:
             if (
@@ -146,6 +156,7 @@ def _parse_skills(data: dict) -> tuple[SkillConfig, ...]:
                 name=_require_string(skill_data, "name"),
                 description=_require_string(skill_data, "description"),
                 tags=tuple(raw_tags),
+                examples=tuple(raw_examples),
                 executor=_parse_executor(skill_data, index),
                 price_atomic=price_atomic,
             )

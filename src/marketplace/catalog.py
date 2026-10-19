@@ -1,4 +1,4 @@
-"""Build a live skill catalog from ERC-8004 identities and A2A AgentCards."""
+"""Build a live catalog from ERC-8004 identities and A2A AgentCards."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from a2a.client import A2ACardResolver
 from a2a.client.errors import A2AClientError
-from a2a.types import AgentCard
+from a2a.types import AgentCard, AgentSkill
 from google.protobuf.json_format import MessageToDict
 from web3.exceptions import Web3Exception
 
@@ -46,12 +46,18 @@ class SkillPrice:
 
 @dataclass(frozen=True, slots=True)
 class CatalogEntry:
+    """One independently priced skill offered by one registered agent."""
+
     agent: RegisteredAgent
     registration: RegistrationDocument
     card: AgentCard
+    skill: AgentSkill
     base_url: str
-    skill_id: str
     price: SkillPrice
+
+    @property
+    def skill_id(self) -> str:
+        return self.skill.id
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +70,7 @@ class SkippedAgent:
 class Catalog:
     entries: tuple[CatalogEntry, ...]
     skipped: tuple[SkippedAgent, ...]
+    registered_count: int
 
 
 def base_url_from_agent_card(endpoint: str) -> str:
@@ -132,10 +139,9 @@ def _validate_skill_routing(card: AgentCard) -> None:
 async def resolve_registered_agent(
     registry: IdentityRegistryClient,
     agent_id: int,
-    skill_id: str,
     http: httpx.AsyncClient,
-) -> CatalogEntry:
-    """Resolve and validate one registered agent for a requested skill."""
+) -> tuple[CatalogEntry, ...]:
+    """Resolve one identity into one catalog entry per advertised skill."""
 
     try:
         agent = registry.read_agent(agent_id)
@@ -173,42 +179,42 @@ async def resolve_registered_agent(
     if card.name != registration.name:
         raise CatalogError("registration name and AgentCard name differ")
     _validate_skill_routing(card)
-    if skill_id not in {skill.id for skill in card.skills}:
-        raise CatalogError(f"skill {skill_id!r} is not advertised")
+    if not card.skills:
+        raise CatalogError("AgentCard advertises no skills")
     if not any(
         interface.url.rstrip("/") == base_url
         for interface in card.supported_interfaces
     ):
         raise CatalogError("AgentCard interface differs from registration service")
 
-    return CatalogEntry(
-        agent=agent,
-        registration=registration,
-        card=card,
-        base_url=base_url,
-        skill_id=skill_id,
-        price=_skill_price(card, skill_id),
+    return tuple(
+        CatalogEntry(
+            agent=agent,
+            registration=registration,
+            card=card,
+            skill=skill,
+            base_url=base_url,
+            price=_skill_price(card, skill.id),
+        )
+        for skill in card.skills
     )
 
 
-async def discover_agents(
-    deployment_path: Path,
-    skill_id: str,
-) -> Catalog:
-    """Return all live registered agents that safely advertise one skill."""
+async def discover_agents(deployment_path: Path) -> Catalog:
+    """Return all safely resolved skill offers from registered live agents."""
 
     deployment = LocalDeployment.from_path(deployment_path)
     registry = IdentityRegistryClient(deployment)
+    registered_ids = registry.registered_agent_ids()
     entries: list[CatalogEntry] = []
     skipped: list[SkippedAgent] = []
 
     async with httpx.AsyncClient(timeout=15, trust_env=False) as http:
-        for agent_id in registry.registered_agent_ids():
+        for agent_id in registered_ids:
             try:
-                entry = await resolve_registered_agent(
+                agent_entries = await resolve_registered_agent(
                     registry,
                     agent_id,
-                    skill_id,
                     http,
                 )
             except (
@@ -220,19 +226,10 @@ async def discover_agents(
             ) as error:
                 skipped.append(SkippedAgent(agent_id, str(error)))
             else:
-                entries.append(entry)
+                entries.extend(agent_entries)
 
-    return Catalog(tuple(entries), tuple(skipped))
-
-
-async def resolve_agent(
-    deployment_path: Path,
-    agent_id: int,
-    skill_id: str,
-) -> CatalogEntry:
-    """Resolve one explicitly known ID through the same catalog validation."""
-
-    deployment = LocalDeployment.from_path(deployment_path)
-    registry = IdentityRegistryClient(deployment)
-    async with httpx.AsyncClient(timeout=15, trust_env=False) as http:
-        return await resolve_registered_agent(registry, agent_id, skill_id, http)
+    return Catalog(
+        entries=tuple(entries),
+        skipped=tuple(skipped),
+        registered_count=len(registered_ids),
+    )

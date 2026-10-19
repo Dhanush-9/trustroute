@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import time
+from dataclasses import dataclass
 
 import httpx
 from a2a.client import A2ACardResolver, ClientConfig, create_client
@@ -19,6 +20,18 @@ from agent.skill_routing import (
 from client.output import heading
 
 
+@dataclass(frozen=True, slots=True)
+class A2AResult:
+    """Correlation identifiers and content returned by one A2A invocation."""
+
+    agent_card_url: str
+    interface_url: str
+    context_id: str
+    task_id: str
+    response: str
+    latency_ms: int
+
+
 def _agent_card_url(base_url: str) -> str:
     return f"{base_url.rstrip('/')}/.well-known/agent-card.json"
 
@@ -30,7 +43,7 @@ async def invoke(
     skill_id: str,
     transport: httpx.AsyncBaseTransport | None = None,
     expected_amount_atomic: str | None = None,
-) -> None:
+) -> A2AResult:
     """Resolve an AgentCard and invoke one explicitly selected skill."""
 
     # Local requests should not be redirected through a system HTTP proxy.
@@ -98,27 +111,36 @@ async def invoke(
                 message=message,
                 metadata={SKILL_METADATA_KEY: skill_id},
             )
-            received_message = False
+            result: A2AResult | None = None
             start_time = time.perf_counter()
 
             async for chunk in client.send_message(request):
                 if chunk.HasField("message"):
-                    received_message = True
                     round_trip_ms = round(
                         (time.perf_counter() - start_time) * 1000
+                    )
+                    response_text = get_message_text(chunk.message)
+                    result = A2AResult(
+                        agent_card_url=_agent_card_url(base_url),
+                        interface_url=interface.url,
+                        context_id=chunk.message.context_id,
+                        task_id=chunk.message.task_id,
+                        response=response_text,
+                        latency_ms=round_trip_ms,
                     )
                     heading("A2A RESULT")
                     print(f"Context ID: {chunk.message.context_id}")
                     print(f"Task ID: {chunk.message.task_id}")
                     print(f"Client-observed invocation: {round_trip_ms} ms")
-                    print(f"Response: {get_message_text(chunk.message)}")
+                    print(f"Response: {response_text}")
 
         finally:
             # The A2A client may own transport resources in addition to HTTP.
             await client.close()
 
-        if not received_message:
+        if result is None:
             raise A2AClientError("agent returned no A2A message")
+        return result
 
 
 def _read_multiline_input() -> str:

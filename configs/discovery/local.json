@@ -1,0 +1,39 @@
+{
+  "ollamaHost": "http://127.0.0.1:11434",
+  "routerModel": "llama3.2",
+  "embeddingModel": "embeddinggemma",
+  "minimumRouterConfidence": 0.65,
+  "minimumSkillSimilarity": 0.55,
+  "taskTypes": [
+    {
+      "id": "summarization",
+      "name": "Text summarization",
+      "description": "Condense a longer passage into a shorter version while preserving its important meaning.",
+      "examples": [
+        "Summarize this article.",
+        "Make this passage shorter.",
+        "Give me the main points from this text."
+      ]
+    },
+    {
+      "id": "translation",
+      "name": "Text translation",
+      "description": "Convert supplied text from one human language into another requested language.",
+      "examples": [
+        "Translate this paragraph into Hindi.",
+        "Convert this English sentence to French.",
+        "How would I say this in Spanish?"
+      ]
+    },
+    {
+      "id": "code_generation",
+      "name": "Code generation",
+      "description": "Create source code from a programming request or software requirement.",
+      "examples": [
+        "Write a Python function that sorts these records.",
+        "Generate Java code for a binary search.",
+        "Create a small program for this requirement."
+      ]
+    }
+  ]
+}

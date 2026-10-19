@@ -100,8 +100,11 @@ class LocalDeployment:
     deployment_block: int
     identity_registry: str
     implementation: str
+    reputation_registry: str | None
+    reputation_implementation: str | None
     owner: str
     version: str
+    reputation_version: str | None
     erc8004_commit: str
 
     @classmethod
@@ -114,8 +117,23 @@ class LocalDeployment:
             deployment_block=int(data.get("deploymentBlock", 0)),
             identity_registry=str(data["identityRegistry"]),
             implementation=str(data["implementation"]),
+            reputation_registry=(
+                str(data["reputationRegistry"])
+                if data.get("reputationRegistry")
+                else None
+            ),
+            reputation_implementation=(
+                str(data["reputationImplementation"])
+                if data.get("reputationImplementation")
+                else None
+            ),
             owner=str(data["owner"]),
             version=str(data["version"]),
+            reputation_version=(
+                str(data["reputationVersion"])
+                if data.get("reputationVersion")
+                else None
+            ),
             erc8004_commit=str(data["erc8004Commit"]),
         )
 

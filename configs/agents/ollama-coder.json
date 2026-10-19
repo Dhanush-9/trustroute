@@ -9,10 +9,11 @@
   },
   "skills": [
     {
-      "id": "summarize_text",
-      "name": "Summarize text",
+      "id": "concise_summary",
+      "name": "Concise technical summary",
       "description": "Condenses a passage into a shorter factual summary.",
       "tags": ["summarization", "text"],
+      "examples": ["Summarize these technical notes.", "Make this documentation shorter."],
       "priceAtomic": "20000",
       "executor": {
         "type": "ollama",
@@ -22,10 +23,11 @@
       }
     },
     {
-      "id": "translate_text",
-      "name": "Translate text",
+      "id": "language_conversion",
+      "name": "Language conversion",
       "description": "Translates text into the target language named by the user.",
       "tags": ["translation", "text"],
+      "examples": ["Convert this text into German.", "Translate this sentence to Hindi."],
       "priceAtomic": "25000",
       "executor": {
         "type": "ollama",
@@ -35,10 +37,11 @@
       }
     },
     {
-      "id": "generate_code",
-      "name": "Generate code",
+      "id": "software_code_generation",
+      "name": "Software code generation",
       "description": "Generates source code from a textual programming request.",
       "tags": ["code", "generation"],
+      "examples": ["Implement this algorithm in Python.", "Create robust Java code for this requirement."],
       "priceAtomic": "50000",
       "executor": {
         "type": "ollama",

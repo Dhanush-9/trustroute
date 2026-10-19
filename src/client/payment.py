@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 import httpx
 from eth_account import Account
@@ -30,6 +31,33 @@ BALANCE_OF_ABI = [
 
 class PaymentPolicyError(ValueError):
     """An advertised skill price is incompatible with the client policy."""
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentReceipt:
+    """Client-observed details of one successful x402 settlement."""
+
+    x402_version: int
+    scheme: str
+    network: str
+    asset: str
+    amount_atomic: str
+    payer: str
+    recipient: str
+    transaction: str
+
+
+@dataclass(slots=True)
+class PaymentSession:
+    """HTTP transport plus the receipt populated by its x402 callbacks."""
+
+    transport: httpx.AsyncBaseTransport
+    receipt: PaymentReceipt | None = None
+
+    def require_receipt(self) -> PaymentReceipt:
+        if self.receipt is None:
+            raise RuntimeError("x402 response contained no successful settlement")
+        return self.receipt
 
 
 def validate_advertised_price(
@@ -71,7 +99,7 @@ def build_paying_transport(
     *,
     expected_recipient: str,
     expected_amount_atomic: str,
-) -> httpx.AsyncBaseTransport:
+) -> PaymentSession:
     """Sign only identity-bound offers matching the advertised skill price."""
 
     private_key = os.environ.get("TRUSTROUTE_PAYER_PRIVATE_KEY")
@@ -109,6 +137,7 @@ def build_paying_transport(
     )
 
     balances_before: dict[str, int] = {}
+    authorization_details: dict[str, str | int] = {}
 
     def enforce_offer(context):
         requirement = context.selected_requirements
@@ -135,6 +164,17 @@ def build_paying_transport(
     def show_authorization(context) -> None:
         requirement = context.selected_requirements
         authorization = context.payment_payload.payload["authorization"]
+        authorization_details.update(
+            {
+                "x402_version": int(context.payment_payload.x402_version),
+                "scheme": str(requirement.scheme),
+                "network": str(requirement.network),
+                "asset": str(requirement.asset),
+                "amount_atomic": str(requirement.amount),
+                "payer": str(authorization["from"]),
+                "recipient": str(authorization["to"]),
+            }
+        )
         balances_before["payer"] = _token_balance(
             web3, network.asset, policy.payer
         )
@@ -174,10 +214,32 @@ def build_paying_transport(
         if balances_before:
             print(f"Amount transferred: {balances_before['payer'] - payer_after}")
         print()
+
+        if settlement.success:
+            payment_session.receipt = PaymentReceipt(
+                x402_version=int(authorization_details["x402_version"]),
+                scheme=str(authorization_details["scheme"]),
+                network=str(authorization_details["network"]),
+                asset=str(authorization_details["asset"]),
+                amount_atomic=str(authorization_details["amount_atomic"]),
+                payer=Web3.to_checksum_address(
+                    str(authorization_details["payer"])
+                ),
+                recipient=Web3.to_checksum_address(
+                    str(authorization_details["recipient"])
+                ),
+                transaction=str(settlement.transaction),
+            )
         return None
 
     client.on_before_payment_creation(enforce_offer)
     client.on_after_payment_creation(show_authorization)
     client.on_payment_response(show_settlement)
 
-    return x402_httpx_transport(client, transport=httpx.AsyncHTTPTransport())
+    payment_session = PaymentSession(
+        transport=x402_httpx_transport(
+            client,
+            transport=httpx.AsyncHTTPTransport(),
+        )
+    )
+    return payment_session

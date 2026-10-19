@@ -96,6 +96,7 @@ def build_agent_card(
             name=skill.name,
             description=skill.description,
             tags=list(skill.tags),
+            examples=list(skill.examples),
         )
         for skill in skills
     ]
