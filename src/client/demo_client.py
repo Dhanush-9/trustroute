@@ -57,6 +57,7 @@ async def invoke(
             httpx_client=http,
             base_url=base_url.rstrip("/"),
         )
+        heading("A2A AGENTCARD")
         card = await resolver.get_agent_card()
 
         if not card.supported_interfaces:
@@ -82,7 +83,6 @@ async def invoke(
                     "AgentCard skill price changed after candidate selection"
                 )
 
-        heading("A2A AGENTCARD")
         print(f"AgentCard: {_agent_card_url(base_url)}")
         print(f"Agent: {card.name}")
         print(f"Version: {card.version}")

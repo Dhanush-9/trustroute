@@ -9,10 +9,10 @@
   },
   "skills": [
     {
-      "id": "text_summarization",
-      "name": "Create a concise summary",
-      "description": "Condenses a passage into a shorter factual summary.",
-      "tags": ["summarization", "text"],
+      "id": "brief_passage_digest",
+      "name": "Brief passage condensation",
+      "description": "Secondary capability for shortening an ordinary passage into a few points.",
+      "tags": ["text", "digest", "secondary"],
       "examples": ["Shorten this passage.", "List the main points from this article."],
       "priceAtomic": "20000",
       "executor": {
@@ -24,9 +24,9 @@
     },
     {
       "id": "text_translation",
-      "name": "Professional language translation",
-      "description": "Translates text into the target language named by the user.",
-      "tags": ["translation", "text"],
+      "name": "Text translation",
+      "description": "Primary specialist capability for careful translation between human languages while preserving meaning and tone.",
+      "tags": ["translation", "language", "text", "primary", "specialist"],
       "examples": ["Translate this letter into Hindi.", "Convert this English paragraph to Spanish."],
       "priceAtomic": "45000",
       "executor": {
@@ -37,10 +37,10 @@
       }
     },
     {
-      "id": "basic_code_writer",
-      "name": "Basic code writing",
-      "description": "Generates source code from a textual programming request.",
-      "tags": ["code", "generation"],
+      "id": "small_program_writer",
+      "name": "Small program writer",
+      "description": "Secondary capability for writing a small uncomplicated program.",
+      "tags": ["programming", "secondary"],
       "examples": ["Write a small Python script.", "Create a simple Java function."],
       "priceAtomic": "25000",
       "executor": {

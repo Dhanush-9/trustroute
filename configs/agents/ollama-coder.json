@@ -9,10 +9,10 @@
   },
   "skills": [
     {
-      "id": "concise_summary",
-      "name": "Concise technical summary",
-      "description": "Condenses a passage into a shorter factual summary.",
-      "tags": ["summarization", "text"],
+      "id": "technical_notes_digest",
+      "name": "Technical notes digest",
+      "description": "Secondary capability for shortening technical notes into a few points.",
+      "tags": ["technical", "digest", "secondary"],
       "examples": ["Summarize these technical notes.", "Make this documentation shorter."],
       "priceAtomic": "20000",
       "executor": {
@@ -23,10 +23,10 @@
       }
     },
     {
-      "id": "language_conversion",
-      "name": "Language conversion",
-      "description": "Translates text into the target language named by the user.",
-      "tags": ["translation", "text"],
+      "id": "basic_language_conversion",
+      "name": "Basic language conversion",
+      "description": "Secondary capability for converting straightforward text into a requested language.",
+      "tags": ["language", "text", "secondary"],
       "examples": ["Convert this text into German.", "Translate this sentence to Hindi."],
       "priceAtomic": "25000",
       "executor": {
@@ -37,10 +37,10 @@
       }
     },
     {
-      "id": "software_code_generation",
-      "name": "Software code generation",
-      "description": "Generates source code from a textual programming request.",
-      "tags": ["code", "generation"],
+      "id": "code_generation",
+      "name": "Code generation",
+      "description": "Primary specialist capability for producing correct runnable source code from software requirements.",
+      "tags": ["code", "software", "generation", "primary", "specialist"],
       "examples": ["Implement this algorithm in Python.", "Create robust Java code for this requirement."],
       "priceAtomic": "50000",
       "executor": {

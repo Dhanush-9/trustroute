@@ -2,8 +2,8 @@
 
 TrustRoute is a prototype marketplace for AI agents. A client describes a task
 in ordinary language; TrustRoute finds independently owned A2A agents registered
-through ERC-8004, lets the client choose one, pays it through x402, invokes it
-through A2A, and can publish interaction-bound feedback.
+through ERC-8004, automatically selects one, pays it through x402, invokes it
+through A2A, and can publish payment-bound feedback.
 
 ## Current capabilities
 
@@ -13,15 +13,17 @@ through A2A, and can publish interaction-bound feedback.
   generation. Agents may use different local skill IDs for the same task.
 - Semantic comparison of the understood task with public AgentCard skill names,
   descriptions, tags, and examples.
-- Manual choice among matching agents. Automatic reputation-based ranking is
-  intentionally not implemented yet.
+- Explainable automatic selection using verified reputation, semantic match,
+  price, and a cold-start rule. `--agent-id` remains an experiment override.
 - Client-side price, network, token, recipient, and budget checks.
 - End-to-end x402 authorization, facilitator verification and settlement, and
   A2A invocation.
 - Optional ERC-8004 feedback with content-addressed interaction evidence.
+- Three read-only reputation views over the same feedback history: raw,
+  task-typed, and interaction-verified.
 
-Reputation aggregation, automatic selection, and the Sybil/circular-payment/
-cold-start experiments are the next research layer.
+Sybil, circular-payment, and cold-start experiments are the next research
+layer.
 
 ## Request flow
 
@@ -31,8 +33,9 @@ natural-language request
   -> scan ERC-8004 identities
   -> read registration documents and A2A AgentCards
   -> semantically compare advertised skills with the task type
-  -> show matching agents, local skill IDs, prices, and budget status
-  -> client chooses an agent
+  -> calculate three ERC-8004 reputation views for matching agents
+  -> show skills, prices, budget status, and reputation
+  -> rank affordable agents and explain the automatic winner
   -> unpaid A2A request receives an HTTP 402 challenge
   -> client validates and signs the payment authorization
   -> facilitator verifies; agent executes; facilitator settles
@@ -42,8 +45,8 @@ natural-language request
 
 The task type is TrustRoute's simple shared label for research and feedback,
 such as `translation`. The A2A skill ID belongs to the agent and does not have
-to use that exact wording: one agent may advertise `translate_text` while
-another advertises `language_conversion`.
+to use that exact wording: one agent may advertise `text_translation` while
+another advertises `general_language_help`.
 
 ## Setup
 
@@ -141,7 +144,7 @@ PYTHONPATH=src python scripts/register_agent.py \
 Each command registers with the owner key named in its agent configuration.
 The assigned `agentId` depends on registration order.
 
-### 5. Discover, choose, pay, and invoke
+### 5. Discover, select, pay, and invoke
 
 ```bash
 source .env.local
@@ -157,10 +160,19 @@ Translate the following sentence into Hindi: Trust requires evidence.
 ```
 
 The client first understands the task, then discovers and compares agents. It
-prints the match score, local skill ID, price, and budget result before asking
-you to choose an eligible `agentId`.
+prints the match score, local skill ID, price, budget result, three reputation
+views, the complete ranking calculation, and the automatically selected agent.
+A final table reports task understanding, registry discovery, semantic
+matching, reputation verification, the complete paid A2A invocation, and total
+time to the response. Payment and model execution are intentionally reported
+together because both occur inside the same x402-protected A2A request.
 
-For a repeatable, non-interactive run:
+For a deliberately paced viva walkthrough, add `--demo-pace 1.5`. This pauses
+for the requested number of seconds before every section heading. Without the
+option there are no presentation delays, and measured timings exclude any demo
+pauses.
+
+For a controlled run that overrides the automatic winner:
 
 ```bash
 PYTHONPATH=src python -m client.discover_and_invoke \
@@ -169,9 +181,9 @@ PYTHONPATH=src python -m client.discover_and_invoke \
   --policy configs/client/local-client.json
 ```
 
-`--agent-id` only skips the prompt; the chosen agent must still match the
-understood task. `--task-type translation` is available as an experimental
-ground-truth override. Normal users do not need it.
+`--agent-id` can select only an affordable eligible candidate; it does not
+bypass discovery or validation. `--task-type translation` is available as an
+experimental ground-truth override. Normal users need neither option.
 
 ### 6. Optionally publish feedback
 
@@ -186,9 +198,57 @@ The client writes `var/evidence/<hash>.json` and submits `giveFeedback` from the
 same wallet that paid. Without `--review`, no feedback transaction is created.
 `--feedback-score 85` supplies the score non-interactively.
 
-Evidence stores hashes of the request and response, not their raw text. It
-shows that a paid interaction and its recorded bytes are linked; it cannot
-prove that the reviewer's quality judgment is honest.
+Evidence stores reviewer-supplied hashes of the request and response, not their
+raw text. Its content hash proves that the submitted evidence file has not
+changed. The independent on-chain proof is the token payment; neither hash
+proves that an A2A response actually occurred or that the quality score is
+honest.
+
+### Reputation views
+
+Every view reads the same ERC-8004 `NewFeedback` events:
+
+- **Raw** averages every non-revoked 0-100 quality score, regardless of task or
+  evidence.
+- **Task-typed** keeps only scores whose `tag2` matches the current task type.
+- **Interaction-verified** additionally checks the evidence hash and fields,
+  the x402 v2 `exact` payment transaction, EIP-3009 authorization, token,
+  payer, registered recipient, amount, payment-receipt uniqueness, and rejects
+  direct self-payment by the agent owner or wallet.
+
+The table displays each average and its contributing record count. `N/A (0)`
+means no feedback qualified; it is deliberately different from a score of
+zero. Malformed or missing evidence is reported as an exclusion rather than
+breaking discovery.
+
+Interaction verification proves that the reviewer paid the registered agent
+and attached consistent evidence. It does not prove that the score is honest,
+and a fresh real payment can still be made by a colluding party. Those limits
+are measured by the later attack experiments.
+
+The verifier confirms that the amount written in evidence equals the actual
+transfer, but it cannot recover a historical x402 price from the token receipt.
+Consequently, a deliberately tiny EIP-3009 transfer can still qualify. This is
+an explicit low-cost attack case for the next experiments, not a claim that
+every verified payment represents a full-price service.
+
+### Automatic selection policy
+
+Only semantically matched offers within the client's budget are ranked. The
+selection trace exposes every input and uses the client-owned settings in
+`configs/client/local-client.json`:
+
+```text
+smoothed trust = (verified total + 50 × 2) / (verified count + 2)
+price score    = 1 - advertised price / client maximum
+final score    = 45% trust + 53% semantic match + 2% price
+                 + a small bonus that decreases as verified reviews arrive
+```
+
+The neutral prior prevents one rating from controlling a new agent's score.
+The decreasing bonus gives cold-start agents a limited opportunity to compete.
+Only interaction-verified feedback affects automatic selection; raw and typed
+scores remain visible experimental baselines.
 
 ## Deliberate rejection examples
 
@@ -228,7 +288,7 @@ the marketplace discovery command.
 | Location                   | Contents |
 | -------------------------- | -------- |
 | `configs/agents/`          | Agent servers, public skills, models, prompts, prices, recipients, and owner-key variable names |
-| `configs/client/`          | Payer address and maximum payment |
+| `configs/client/`          | Payer address, maximum payment, and explainable selection weights |
 | `configs/discovery/`       | Task types, thresholds, and local Ollama routing/embedding models |
 | `configs/facilitator/`     | Facilitator URL, signer address, and network |
 | `var/*.json`               | Generated deployment data, ignored by Git |
@@ -243,6 +303,7 @@ the marketplace discovery command.
   invocation, and feedback
 - `src/marketplace/`: ERC-8004 event scan, registration resolution, and
   AgentCard validation
+- `src/reputation/`: feedback views and interaction-evidence verification
 - `src/facilitator/`: x402 verification and settlement service
 - `src/erc8004/`: Identity and Reputation Registry adapters
 - `src/x402_support/`: shared network and token data

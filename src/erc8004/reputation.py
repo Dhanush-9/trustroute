@@ -87,9 +87,11 @@ REPUTATION_REGISTRY_ABI = [
 
 @dataclass(frozen=True, slots=True)
 class FeedbackRecord:
-    """One feedback record confirmed by both event and contract read-back."""
+    """One on-chain feedback event plus its current stored state."""
 
     transaction_hash: str
+    block_number: int
+    log_index: int
     agent_id: int
     client_address: str
     feedback_index: int
@@ -104,16 +106,23 @@ class FeedbackRecord:
 
 
 class ReputationRegistryClient:
-    """Submit and read feedback against one deployed Reputation Registry."""
+    """Read feedback and optionally submit it to a Reputation Registry."""
 
-    def __init__(self, deployment: LocalDeployment, *, private_key: str) -> None:
+    def __init__(
+        self,
+        deployment: LocalDeployment,
+        *,
+        private_key: str | None = None,
+    ) -> None:
         if deployment.reputation_registry is None:
             raise RuntimeError(
                 "deployment has no Reputation Registry; redeploy ERC-8004 registries"
             )
 
         self.deployment = deployment
-        self._account: LocalAccount = Account.from_key(private_key)
+        self._account: LocalAccount | None = (
+            Account.from_key(private_key) if private_key is not None else None
+        )
         self.web3 = Web3(Web3.HTTPProvider(deployment.rpc_url))
         if not self.web3.is_connected():
             raise ConnectionError(
@@ -142,7 +151,70 @@ class ReputationRegistryClient:
 
     @property
     def signer_address(self) -> str:
+        if self._account is None:
+            raise RuntimeError("a private key is required for registry writes")
         return self._account.address
+
+    def feedback_records(
+        self,
+        agent_ids: set[int] | None = None,
+    ) -> tuple[FeedbackRecord, ...]:
+        """Read current feedback state from official NewFeedback events.
+
+        The event retains the URI, evidence hash, endpoint and original value.
+        ``readFeedback`` supplies the current revocation state and confirms that
+        the stored score and tags still agree with the event.
+        """
+
+        events = self.contract.events.NewFeedback().get_logs(
+            from_block=self.deployment.deployment_block,
+            to_block="latest",
+        )
+        records: list[FeedbackRecord] = []
+        for event in events:
+            values = event["args"]
+            agent_id = int(values["agentId"])
+            if agent_ids is not None and agent_id not in agent_ids:
+                continue
+
+            client_address = Web3.to_checksum_address(values["clientAddress"])
+            feedback_index = int(values["feedbackIndex"])
+            stored = self.contract.functions.readFeedback(
+                agent_id,
+                client_address,
+                feedback_index,
+            ).call()
+
+            if (
+                int(stored[0]) != int(values["value"])
+                or int(stored[1]) != int(values["valueDecimals"])
+                or str(stored[2]) != str(values["tag1"])
+                or str(stored[3]) != str(values["tag2"])
+            ):
+                raise RuntimeError("feedback event and current contract state differ")
+
+            records.append(
+                FeedbackRecord(
+                    transaction_hash=Web3.to_hex(event["transactionHash"]),
+                    block_number=int(event["blockNumber"]),
+                    log_index=int(event["logIndex"]),
+                    agent_id=agent_id,
+                    client_address=client_address,
+                    feedback_index=feedback_index,
+                    value=int(stored[0]),
+                    value_decimals=int(stored[1]),
+                    tag1=str(stored[2]),
+                    tag2=str(stored[3]),
+                    endpoint=str(values["endpoint"]),
+                    feedback_uri=str(values["feedbackURI"]),
+                    feedback_hash=Web3.to_hex(values["feedbackHash"]),
+                    is_revoked=bool(stored[4]),
+                )
+            )
+
+        return tuple(
+            sorted(records, key=lambda item: (item.block_number, item.log_index))
+        )
 
     def last_index(self, agent_id: int, client_address: str) -> int:
         """Return how many feedback records this client submitted to an agent."""
@@ -168,6 +240,8 @@ class ReputationRegistryClient:
     ) -> FeedbackRecord:
         """Sign, submit, and read back one ERC-8004 feedback record."""
 
+        if self._account is None:
+            raise RuntimeError("a private key is required for registry writes")
         if agent_id < 0:
             raise ValueError("agent ID must not be negative")
         if not 0 <= value_decimals <= 18:
@@ -240,6 +314,8 @@ class ReputationRegistryClient:
 
         return FeedbackRecord(
             transaction_hash=self.web3.to_hex(tx_hash),
+            block_number=int(events[0]["blockNumber"]),
+            log_index=int(events[0]["logIndex"]),
             agent_id=agent_id,
             client_address=str(event["clientAddress"]),
             feedback_index=feedback_index,

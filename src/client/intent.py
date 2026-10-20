@@ -50,7 +50,10 @@ class TaskType:
     @property
     def search_text(self) -> str:
         examples = " ".join(self.examples)
-        return f"{self.name}. {self.description} Examples: {examples}"
+        return (
+            f"{self.name}. {self.description} Examples: {examples}. "
+            "Search target: an advertised primary specialist capability."
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,8 +234,9 @@ def _skill_text(entry: CatalogEntry) -> str:
     skill = entry.skill
     tags = ", ".join(skill.tags)
     examples = " ".join(skill.examples)
+    readable_id = skill.id.replace("_", " ")
     return (
-        f"{skill.name}. {skill.description} "
+        f"Skill identifier: {readable_id}. {skill.name}. {skill.description} "
         f"Tags: {tags}. Examples: {examples}"
     )
 

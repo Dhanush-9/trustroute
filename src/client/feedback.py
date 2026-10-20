@@ -6,19 +6,15 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
 
 from web3 import Web3
 
 from client.config import ClientPaymentPolicy
-from client.output import heading
 from client.invocation import InvocationPlan, PaidInvocation
 from erc8004.identity import LocalDeployment
 from erc8004.reputation import FeedbackRecord, ReputationRegistryClient
-
-
-QUALITY_TAG = "quality"
-EVIDENCE_SCHEMA = "urn:trustroute:interaction-evidence:v2"
+from reputation import QUALITY_TAG
+from reputation.evidence import EVIDENCE_SCHEMA, load_local_evidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +79,8 @@ def _evidence_document(
             "taskId": a2a.task_id,
         },
         "proofOfPayment": {
+            "x402Version": payment.x402_version,
+            "scheme": payment.scheme,
             "fromAddress": payment.payer,
             "toAddress": payment.recipient,
             "chainId": str(plan.network.chain_id),
@@ -122,27 +120,8 @@ def _write_evidence(document: dict, output_dir: Path) -> EvidenceArtifact:
         uri=path.as_uri(),
         content_hash=content_hash,
     )
-    verify_local_evidence(artifact.uri, artifact.content_hash)
+    load_local_evidence(artifact.uri, artifact.content_hash, resolved_dir)
     return artifact
-
-
-def verify_local_evidence(feedback_uri: str, expected_hash: str) -> dict:
-    """Load a local evidence URI only when its exact bytes match the event."""
-
-    parsed = urlsplit(feedback_uri)
-    if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
-        raise ValueError("Checkpoint 4A verifier supports only local file URIs")
-
-    path = Path(unquote(parsed.path))
-    content = path.read_bytes()
-    actual_hash = Web3.to_hex(Web3.keccak(content))
-    if actual_hash.lower() != expected_hash.lower():
-        raise ValueError("feedback evidence hash does not match the on-chain event")
-
-    document = json.loads(content)
-    if not isinstance(document, dict):
-        raise ValueError("feedback evidence must be a JSON object")
-    return document
 
 
 def submit_interaction_feedback(
@@ -189,7 +168,6 @@ def submit_interaction_feedback(
         feedback_hash=evidence.content_hash,
     )
 
-    heading("ERC-8004 FEEDBACK")
     print(f"Reputation Registry: {registry.contract.address}")
     print(f"Agent ID: {record.agent_id}")
     print(f"Reviewer and x402 payer: {record.client_address}")

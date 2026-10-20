@@ -9,10 +9,10 @@
   },
   "skills": [
     {
-      "id": "summarize_text",
-      "name": "Summarize text",
-      "description": "Condenses a passage into a shorter factual summary.",
-      "tags": ["summarization", "text"],
+      "id": "text_summarization",
+      "name": "Text summarization",
+      "description": "Primary capability for condensing a passage while preserving its important meaning.",
+      "tags": ["summarization", "text", "primary"],
       "examples": ["Summarize this article.", "Give me the main points from this passage."],
       "priceAtomic": "28000",
       "executor": {
@@ -23,10 +23,10 @@
       }
     },
     {
-      "id": "translate_text",
-      "name": "Translate text",
-      "description": "Translates text into the target language named by the user.",
-      "tags": ["translation", "text"],
+      "id": "general_language_help",
+      "name": "General language conversion",
+      "description": "Secondary capability for converting straightforward everyday sentences between languages.",
+      "tags": ["language", "text", "secondary"],
       "examples": ["Translate this paragraph into Hindi.", "Convert this sentence to French."],
       "priceAtomic": "30000",
       "executor": {
@@ -37,10 +37,10 @@
       }
     },
     {
-      "id": "generate_code",
-      "name": "Generate code",
-      "description": "Generates source code from a textual programming request.",
-      "tags": ["code", "generation"],
+      "id": "simple_programming_help",
+      "name": "Simple programming assistance",
+      "description": "Secondary capability for producing short example programs for uncomplicated requests.",
+      "tags": ["programming", "secondary"],
       "examples": ["Write a Python function for this task.", "Generate Java code for binary search."],
       "priceAtomic": "32000",
       "executor": {

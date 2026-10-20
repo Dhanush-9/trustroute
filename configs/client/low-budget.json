@@ -1,5 +1,13 @@
 {
   "networkDeployment": "../../var/payment-network.json",
   "payer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
-  "maxAmountAtomic": "20000"
+  "maxAmountAtomic": "20000",
+  "selection": {
+    "reputationWeight": 0.45,
+    "semanticWeight": 0.53,
+    "priceWeight": 0.02,
+    "priorScore": 50,
+    "priorWeight": 2,
+    "coldStartBonus": 0.03
+  }
 }
